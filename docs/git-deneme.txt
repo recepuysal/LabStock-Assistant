@@ -1,0 +1,3 @@
+Bu dosya Git / GitHub Desktop akışını denemek için eklendi.
+
+Desktop'ta: Changes → dosyayı işaretleyin → Summary yazın → Commit to main → Push origin.
