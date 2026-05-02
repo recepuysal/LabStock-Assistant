@@ -2,6 +2,8 @@
 
 Elektronik bileşen stok takibi için masaüstü uygulaması. Hedef: hibrit LLM desteği ve sesli etkileşim (geliştirme aşamasında).
 
+*AI-powered inventory management for electronic components with hybrid LLM support and voice interaction.*
+
 ## Teknoloji
 
 - [Electron](https://www.electronjs.org/) + [Vite](https://vitejs.dev/) + React + TypeScript
