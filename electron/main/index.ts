@@ -3,6 +3,9 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
+import { depoChat, type DepoChatPayload } from './depoChat'
+import { geminiGenerateContent, type GeminiAskPayload } from './gemini'
+import { getLabstockDataPath, loadLabstockDataFile, saveLabstockDataFile } from './persistence'
 import { update } from './update'
 
 const require = createRequire(import.meta.url)
@@ -46,6 +49,12 @@ const indexHtml = path.join(RENDERER_DIST, 'index.html')
 async function createWindow() {
   win = new BrowserWindow({
     title: 'LabStock Assistant',
+    width: 1100,
+    height: 760,
+    minWidth: 880,
+    minHeight: 560,
+    show: false,
+    backgroundColor: '#f1f5f9',
     icon: path.join(process.env.VITE_PUBLIC, 'favicon.ico'),
     webPreferences: {
       preload,
@@ -58,10 +67,16 @@ async function createWindow() {
     },
   })
 
+  win.once('ready-to-show', () => {
+    win?.show()
+    win?.focus()
+  })
+
   if (VITE_DEV_SERVER_URL) { // #298
     win.loadURL(VITE_DEV_SERVER_URL)
-    // Open devTool if the app is not packaged
-    win.webContents.openDevTools()
+    if (process.env.OPEN_DEVTOOLS === '1') {
+      win.webContents.openDevTools({ mode: 'detach' })
+    }
   } else {
     win.loadFile(indexHtml)
   }
@@ -120,4 +135,27 @@ ipcMain.handle('open-win', (_, arg) => {
   } else {
     childWindow.loadFile(indexHtml, { hash: arg })
   }
+})
+
+ipcMain.handle('labstock:gemini-ask', async (_event, payload: GeminiAskPayload) => {
+  return geminiGenerateContent(payload)
+})
+
+ipcMain.handle('labstock:depo-chat', async (_event, payload: DepoChatPayload) => {
+  return depoChat(payload)
+})
+
+ipcMain.handle('labstock:persistence-load', async () => {
+  return loadLabstockDataFile()
+})
+
+ipcMain.handle('labstock:persistence-save', async (_event, json: string) => {
+  if (typeof json !== 'string' || json.length > 50 * 1024 * 1024) {
+    return { ok: false, error: 'Geçersiz veri boyutu.' }
+  }
+  return saveLabstockDataFile(json)
+})
+
+ipcMain.handle('labstock:persistence-path', () => {
+  return getLabstockDataPath()
 })

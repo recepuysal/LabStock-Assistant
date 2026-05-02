@@ -21,7 +21,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "@supabase/supabase-js": "^2.105.1",
+    "electron-updater": "^6.3.9",
+    "react-router-dom": "^7.14.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.2",

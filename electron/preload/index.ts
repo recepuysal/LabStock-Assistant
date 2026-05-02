@@ -23,6 +23,43 @@ contextBridge.exposeInMainWorld('ipcRenderer', {
   // ...
 })
 
+export type LabStockGeminiPayload = {
+  apiKey: string
+  systemInstruction: string
+  userMessage: string
+}
+
+export type LabStockDepoChatPayload = {
+  provider: 'groq' | 'gemini'
+  apiKey: string
+  inventoryJson: string
+  history: Array<{ role: 'user' | 'assistant'; content: string }>
+}
+
+export type PersistenceLoadResult =
+  | { ok: true; data: string | null }
+  | { ok: false; error: string }
+
+export type PersistenceSaveResult = { ok: true } | { ok: false; error: string }
+
+contextBridge.exposeInMainWorld('labstock', {
+  geminiAsk(payload: LabStockGeminiPayload) {
+    return ipcRenderer.invoke('labstock:gemini-ask', payload) as Promise<string>
+  },
+  depoChat(payload: LabStockDepoChatPayload) {
+    return ipcRenderer.invoke('labstock:depo-chat', payload) as Promise<string>
+  },
+  persistenceLoad(): Promise<PersistenceLoadResult> {
+    return ipcRenderer.invoke('labstock:persistence-load') as Promise<PersistenceLoadResult>
+  },
+  persistenceSave(json: string): Promise<PersistenceSaveResult> {
+    return ipcRenderer.invoke('labstock:persistence-save', json) as Promise<PersistenceSaveResult>
+  },
+  persistencePath(): Promise<string> {
+    return ipcRenderer.invoke('labstock:persistence-path') as Promise<string>
+  },
+})
+
 // --------- Preload scripts loading ---------
 function domReady(condition: DocumentReadyState[] = ['complete', 'interactive']) {
   return new Promise(resolve => {
