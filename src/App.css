@@ -1,0 +1,4 @@
+/* Uygulama özel stiller; yerleşim çoğunlukla Tailwind (index.css) ile. */
+.app-shell {
+  font-family: Inter, system-ui, sans-serif;
+}
