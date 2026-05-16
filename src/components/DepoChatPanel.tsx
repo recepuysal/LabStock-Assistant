@@ -1,4 +1,4 @@
-import { useEffect, useRef, type KeyboardEvent } from 'react'
+﻿import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 export type ChatMessage = {
@@ -8,15 +8,19 @@ export type ChatMessage = {
   isFallback?: boolean
 }
 
+const SUGGESTIONS = [
+  { label: 'Stok özeti', text: 'Stokta kaç farklı parça var? Kısa özet ver.' },
+  { label: 'Kritik stok', text: 'Biten veya az kalan parçaları listele.' },
+  { label: 'Parça ara', text: 'LM358 veya benzeri entegre var mı, kaç adet ve nerede?' },
+  { label: 'Konumlar', text: 'Hangi parçalar hangi kutuda veya rafta?' },
+]
+
 function formatParagraph(text: string, inverse: boolean) {
   const segments = text.split(/(\*\*[^*]+\*\*)/g)
   return segments.map((seg, i) => {
     if (seg.startsWith('**') && seg.endsWith('**') && seg.length > 4) {
       return (
-        <strong
-          key={i}
-          className={inverse ? 'font-semibold text-white' : 'font-semibold text-slate-900'}
-        >
+        <strong key={i} className={inverse ? 'font-semibold text-ls-on-accent' : 'font-semibold text-ls-text'}>
           {seg.slice(2, -2)}
         </strong>
       )
@@ -27,11 +31,12 @@ function formatParagraph(text: string, inverse: boolean) {
 
 function MessageBody({ text, inverse = false }: { text: string; inverse?: boolean }) {
   const blocks = text.split(/\n{2,}/)
-  const bodyCls = inverse
-    ? 'text-[0.9375rem] leading-relaxed text-white/95'
-    : 'text-[0.9375rem] leading-relaxed text-slate-700'
   return (
-    <div className={`space-y-3 ${bodyCls}`}>
+    <div
+      className={`space-y-2.5 text-[0.9375rem] leading-relaxed ${
+        inverse ? 'text-ls-on-accent' : 'text-ls-text'
+      }`}
+    >
       {blocks.map((block, i) => (
         <p key={i} className="min-w-0 whitespace-pre-wrap break-words">
           {formatParagraph(block, inverse)}
@@ -39,6 +44,21 @@ function MessageBody({ text, inverse = false }: { text: string; inverse?: boolea
       ))}
     </div>
   )
+}
+
+type Props = {
+  messages: ChatMessage[]
+  composerValue: string
+  onComposerChange: (v: string) => void
+  onSend: () => void
+  loading: boolean
+  bridgeMissing: boolean
+  providerLabel: string
+  stockCount: number
+  hasApiKey: boolean
+  onSuggestion?: (text: string) => void
+  onClear?: () => void
+  onKayitSearch?: () => void
 }
 
 export function DepoChatPanel({
@@ -49,16 +69,14 @@ export function DepoChatPanel({
   loading,
   bridgeMissing,
   providerLabel,
-}: {
-  messages: ChatMessage[]
-  composerValue: string
-  onComposerChange: (v: string) => void
-  onSend: () => void
-  loading: boolean
-  bridgeMissing: boolean
-  providerLabel: string
-}) {
+  stockCount,
+  hasApiKey,
+  onSuggestion,
+  onClear,
+  onKayitSearch,
+}: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
+  const showSuggestions = messages.length <= 1 && !loading && !!onSuggestion
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -67,102 +85,168 @@ export function DepoChatPanel({
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      if (!loading && composerValue.trim()) onSend()
+      if (!loading && composerValue.trim() && !bridgeMissing) onSend()
     }
   }
 
+  const statusLabel = bridgeMissing ? 'Yerel mod' : hasApiKey ? providerLabel : 'Anahtar gerekli'
+
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col">
-      <div
-        className="min-h-0 flex-1 overflow-y-auto rounded-2xl border border-ls-line bg-ls-surface p-4 shadow-card sm:p-5"
-        style={{ maxHeight: 'min(62vh, 640px)' }}
-      >
-        <div className="mx-auto flex w-full flex-col gap-4">
+    <div className="ls-chat-shell">
+      <div className="ls-chat-toolbar">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ls-text">Depo asistanı</p>
+          <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ls-text-muted">
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                bridgeMissing ? 'bg-ls-warn' : hasApiKey ? 'bg-ls-accent' : 'bg-ls-text-muted'
+              }`}
+              aria-hidden
+            />
+            {stockCount} parça · {statusLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {onKayitSearch ? (
+            <button type="button" onClick={onKayitSearch} className="ls-btn-secondary py-2 text-xs">
+              Kayıt’ta ara
+            </button>
+          ) : null}
+          {onClear ? (
+            <button type="button" onClick={onClear} className="ls-btn-ghost py-2 text-xs">
+              Temizle
+            </button>
+          ) : null}
+          <Link to="/app/ayarlar" className="ls-btn-ghost py-2 text-xs">
+            API
+          </Link>
+        </div>
+      </div>
+
+      <div className="ls-chat-messages">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+          {showSuggestions ? (
+            <div className="mb-2 rounded-xl border border-dashed border-ls-line bg-ls-muted px-4 py-6 text-center">
+              <p className="text-sm font-medium text-ls-text">Depo hakkında soru sorun</p>
+              <p className="mt-1 text-xs text-ls-text-muted">
+                Yanıtlar yalnızca kayıtlı stok listenize dayanır.
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {SUGGESTIONS.map(({ label, text }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => onSuggestion?.(text)}
+                    className="w-full rounded-lg border border-ls-line bg-ls-surface px-3 py-2.5 text-left text-sm text-ls-text transition-colors hover:border-ls-accent-border hover:bg-ls-muted"
+                  >
+                    <span className="font-medium">{label}</span>
+                    <span className="mt-0.5 block text-xs text-ls-text-muted line-clamp-2">{text}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className="flex w-full justify-end pl-4 sm:pl-10">
+              <div key={m.id} className="flex justify-end">
                 <div
-                  className="w-fit max-w-[min(100%,40rem)] min-w-0 rounded-2xl rounded-br-md bg-brand px-4 py-3.5 text-left shadow-bubble"
+                  className="max-w-[90%] rounded-lg rounded-br-sm bg-ls-accent px-4 py-3 sm:max-w-[85%]"
                   style={{ wordBreak: 'break-word' }}
                 >
                   <MessageBody text={m.content} inverse />
                 </div>
               </div>
             ) : (
-              <div key={m.id} className="flex w-full justify-start pr-4 sm:pr-8">
+              <div key={m.id} className="flex gap-3">
                 <div
-                  className={`w-fit max-w-[min(100%,56rem)] min-w-0 rounded-2xl rounded-bl-md border px-4 py-3.5 text-left shadow-card ${
-                    m.isFallback
-                      ? 'border-amber-200/90 bg-gradient-to-b from-amber-50 to-amber-50/50'
-                      : 'border-ls-line bg-ls-muted/80'
-                  }`}
+                  className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ls-accent-soft text-[10px] font-bold text-ls-accent"
+                  aria-hidden
                 >
-                  <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                    <span className="text-2xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-                      Asistan
-                    </span>
+                  LS
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="text-xs font-medium text-ls-text">Asistan</span>
                     {m.isFallback ? (
-                      <span className="rounded-md bg-amber-100/90 px-2 py-0.5 text-2xs font-semibold text-amber-900">
-                        Yerel özet
+                      <span className="rounded-md bg-ls-warn-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase text-ls-warn">
+                        Yerel
                       </span>
                     ) : (
-                      <span className="rounded-md bg-teal-100/80 px-2 py-0.5 text-2xs font-semibold text-teal-900">
-                        {providerLabel}
-                      </span>
+                      <span className="text-[10px] text-ls-text-muted">{providerLabel}</span>
                     )}
                   </div>
-                  <MessageBody text={m.content} />
+                  <div
+                    className={`rounded-2xl rounded-tl-md border px-4 py-3 ${
+                      m.isFallback
+                        ? 'border-ls-warn/30 bg-ls-warn-soft/50'
+                        : 'border-ls-line bg-ls-elevated'
+                    }`}
+                  >
+                    <MessageBody text={m.content} />
+                  </div>
                 </div>
               </div>
             ),
           )}
+
           {loading ? (
-            <div className="flex justify-start pl-1">
-              <div className="flex items-center gap-1.5 rounded-2xl border border-ls-line bg-ls-muted px-5 py-3.5 shadow-inset">
-                <span className="h-2 w-2 animate-bounce rounded-full bg-teal-500 [animation-delay:-0.2s]" />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-teal-500 [animation-delay:-0.1s]" />
-                <span className="h-2 w-2 animate-bounce rounded-full bg-teal-500" />
+            <div className="flex gap-3">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-ls-muted text-[10px] font-bold text-ls-text-muted">
+                ...
+              </div>
+              <div className="flex items-center gap-1 rounded-2xl border border-ls-line bg-ls-muted px-4 py-3">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ls-accent" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ls-accent [animation-delay:150ms]" />
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-ls-accent [animation-delay:300ms]" />
               </div>
             </div>
           ) : null}
-          <div ref={bottomRef} />
+
+          <div ref={bottomRef} className="h-1 shrink-0" />
         </div>
       </div>
 
       {bridgeMissing ? (
-        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-2.5 text-center text-xs font-medium text-amber-950">
-          Sohbet için uygulamayı masaüstü (Electron) modunda açın.
+        <p className="shrink-0 border-t border-ls-warn/20 bg-ls-warn-soft px-4 py-2 text-center text-xs text-ls-warn">
+          Tam sohbet için uygulamayı Electron (masaüstü) modunda çalıştırın.
+        </p>
+      ) : !hasApiKey ? (
+        <p className="shrink-0 border-t border-ls-line bg-ls-muted/50 px-4 py-2 text-center text-xs text-ls-text-muted">
+          Bulut yanıtı için{' '}
+          <Link to="/app/ayarlar" className="font-medium text-ls-accent hover:underline">
+            Ayarlar
+          </Link>
+          ’dan Groq veya Gemini anahtarı ekleyin.
         </p>
       ) : null}
 
-      <div className="mt-4 flex shrink-0 items-end gap-2 rounded-2xl border border-ls-line bg-ls-surface p-2 shadow-float">
-        <textarea
-          value={composerValue}
-          onChange={(e) => onComposerChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Mesajınızı yazın…"
-          rows={2}
-          disabled={loading || bridgeMissing}
-          className="max-h-36 min-h-[52px] flex-1 resize-none rounded-xl border-0 bg-transparent px-3 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0 disabled:opacity-50"
-        />
-        <button
-          type="button"
-          onClick={onSend}
-          disabled={loading || bridgeMissing || !composerValue.trim()}
-          className="mb-0.5 shrink-0 rounded-xl bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-bubble transition hover:brightness-110 active:brightness-95 disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
-        >
-          Gönder
-        </button>
+      <div className="ls-chat-composer">
+        <div className="mx-auto flex w-full max-w-2xl items-end gap-2">
+          <textarea
+            value={composerValue}
+            onChange={(e) => onComposerChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Mesajınızı yazın… (Enter gönder, Shift+Enter satır)"
+            rows={2}
+            disabled={loading || bridgeMissing}
+            className="ls-input max-h-28 min-h-[44px] flex-1 resize-none py-3"
+          />
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={loading || bridgeMissing || !composerValue.trim()}
+            className="ls-btn-primary h-11 w-11 shrink-0 rounded-lg px-0 text-lg disabled:opacity-35"
+            aria-label="Gönder"
+            title="Gönder"
+          >
+            &#8593;
+          </button>
+        </div>
+        <p className="mx-auto mt-2 max-w-2xl text-center text-[10px] text-ls-text-muted">
+          Shift+Enter yeni satır
+        </p>
       </div>
-      <p className="mt-3 text-center text-2xs font-medium text-slate-500">
-        Bulut API:{' '}
-        <Link
-          to="/ayarlar"
-          className="font-semibold text-teal-700 underline decoration-teal-700/30 underline-offset-2 hover:decoration-teal-700"
-        >
-          Ayarlar
-        </Link>
-      </p>
     </div>
   )
 }

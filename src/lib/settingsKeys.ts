@@ -9,6 +9,9 @@ export const LS_GROQ_API_KEY = 'labstock.settings.groqApiKey'
 /** Bulut sohbet sağlayıcısı */
 export const LS_AI_PROVIDER = 'labstock.settings.aiProvider'
 
+/** Arayüz teması: light | dark */
+export const LS_THEME = 'labstock.settings.theme'
+
 /** @deprecated Eski bayrak; yeni akışta kullanılmıyor */
 export const LS_GEMINI_ENHANCE = 'labstock.settings.geminiEnhance'
 
@@ -23,3 +26,24 @@ export const LS_ADMIN_PIN_HASH = 'labstock.settings.adminPinHash'
 
 /** Bu sekmede yönetici oturumu açık mı */
 export const SS_ADMIN_UNLOCKED = 'labstock.session.adminUnlocked'
+
+/** Yerel kullanıcı kayıtları (e-posta + şifre özeti) */
+export const LS_AUTH_REGISTRY = 'labstock.auth.registry'
+
+/** Oturum açık kullanıcı (yerel mod) */
+export const LS_AUTH_SESSION = 'labstock.auth.session'
+
+/** «Beni hatırla» ile saklanan e-posta */
+export const LS_AUTH_REMEMBER_EMAIL = 'labstock.auth.rememberEmail'
+
+/** Bekleyen kayıt OTP (yerel mod) */
+export const LS_AUTH_PENDING_OTP = 'labstock.auth.pendingOtp'
+
+/** Kayıt için doğrulanmış e-posta (oturum; şifre adımına kadar) */
+export const SS_EMAIL_VERIFIED = 'labstock.session.emailVerified'
+
+/** Resend.com API anahtarı (kayıt doğrulama e-postası) */
+export const LS_RESEND_API_KEY = 'labstock.settings.resendApiKey'
+
+/** Resend gönderen adresi (ör. LabStock <onboarding@resend.dev>) */
+export const LS_RESEND_FROM = 'labstock.settings.resendFrom'

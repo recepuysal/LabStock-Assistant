@@ -32,16 +32,16 @@ export function AdminUnlockModal({ open, onSubmit, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="admin-unlock-title"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-ls-line bg-ls-surface p-5 shadow-float">
-        <h2 id="admin-unlock-title" className="text-base font-semibold text-slate-900">
+      <div className="ls-card w-full max-w-sm p-5">
+        <h2 id="admin-unlock-title" className="text-base font-semibold text-ls-text">
           Yönetici girişi
         </h2>
-        <p className="mt-2 text-sm text-slate-600">Stok düzenlemek için yönetici PIN’ini girin.</p>
+        <p className="mt-2 text-sm text-ls-text-muted">Stok düzenlemek için PIN girin.</p>
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 space-y-3">
           <input
             type="password"
@@ -51,28 +51,16 @@ export function AdminUnlockModal({ open, onSubmit, onClose }: Props) {
               setPin(e.target.value)
               setErr(false)
             }}
-            className="ls-input py-2.5"
+            className="ls-input"
             placeholder="PIN"
             autoFocus
           />
-          {err ? <p className="text-sm font-medium text-red-600">PIN eşleşmedi.</p> : null}
+          {err ? <p className="text-sm font-medium text-ls-danger">PIN eşleşmedi.</p> : null}
           <div className="flex justify-end gap-2 pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                setPin('')
-                setErr(false)
-                onClose()
-              }}
-              className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-            >
+            <button type="button" onClick={onClose} className="ls-btn-ghost">
               Vazgeç
             </button>
-            <button
-              type="submit"
-              disabled={busy || !pin.trim()}
-              className="rounded-xl bg-brand px-4 py-2 text-sm font-semibold text-white shadow-bubble transition hover:brightness-110 disabled:opacity-40"
-            >
+            <button type="submit" disabled={busy || !pin.trim()} className="ls-btn-primary">
               Aç
             </button>
           </div>

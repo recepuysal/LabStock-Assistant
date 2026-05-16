@@ -42,6 +42,16 @@ export type PersistenceLoadResult =
 
 export type PersistenceSaveResult = { ok: true } | { ok: false; error: string }
 
+export type ResendSendPayload = {
+  apiKey: string
+  from: string
+  to: string
+  subject: string
+  html: string
+}
+
+export type ResendSendResult = { ok: true } | { ok: false; error: string }
+
 contextBridge.exposeInMainWorld('labstock', {
   geminiAsk(payload: LabStockGeminiPayload) {
     return ipcRenderer.invoke('labstock:gemini-ask', payload) as Promise<string>
@@ -57,6 +67,9 @@ contextBridge.exposeInMainWorld('labstock', {
   },
   persistencePath(): Promise<string> {
     return ipcRenderer.invoke('labstock:persistence-path') as Promise<string>
+  },
+  sendResendEmail(payload: ResendSendPayload): Promise<ResendSendResult> {
+    return ipcRenderer.invoke('labstock:resend-send', payload) as Promise<ResendSendResult>
   },
 })
 

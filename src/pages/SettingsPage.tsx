@@ -1,19 +1,27 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { AdminUnlockModal } from '@/components/AdminUnlockModal'
+import { SettingsField, SettingsSection, SettingsStatus } from '@/components/SettingsSection'
+import { useAuth } from '@/context/AuthContext'
 import { useInventory } from '@/context/InventoryContext'
 import { useSimpleAccess } from '@/context/SimpleAccessContext'
+import { useTheme } from '@/context/ThemeContext'
 import { downloadPartsAsExcel } from '@/lib/excel'
 import { serializeLabData } from '@/lib/labData'
 import {
   LS_AI_PROVIDER,
   LS_GEMINI_API_KEY,
   LS_GROQ_API_KEY,
+  LS_RESEND_API_KEY,
+  LS_RESEND_FROM,
   LS_START_ON_KAYIT,
 } from '@/lib/settingsKeys'
+import { isCloudTeamMode } from '@/lib/supabase/client'
 
 const GEMINI_KEY_URL = 'https://aistudio.google.com/app/apikey'
 const GROQ_KEY_URL = 'https://console.groq.com/keys'
+const RESEND_KEY_URL = 'https://resend.com/api-keys'
 
-/** Yapıştırmadan gelen BOM / zero-width vb. temizlik */
 function normalizeApiKeyInput(raw: string): string {
   return raw
     .replace(/^\uFEFF/, '')
@@ -29,14 +37,66 @@ const auditActionLabel: Record<string, string> = {
   replace_all: 'Toplu değiştirme',
 }
 
+function ApiKeyRow({
+  id,
+  value,
+  placeholder,
+  disabled,
+  onChange,
+  onSubmit,
+  submitLabel = 'Kaydet',
+  submitPrimary = false,
+}: {
+  id: string
+  value: string
+  placeholder: string
+  disabled: boolean
+  onChange: (v: string) => void
+  onSubmit: () => void
+  submitLabel?: string
+  submitPrimary?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+      <input
+        id={id}
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="ls-input min-w-0 flex-1"
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onSubmit}
+        className={submitPrimary ? 'ls-btn-primary shrink-0' : 'ls-btn-secondary shrink-0'}
+      >
+        {submitLabel}
+      </button>
+    </div>
+  )
+}
+
 export function SettingsPage() {
+  const navigate = useNavigate()
+  const { user, logout, modeLabel } = useAuth()
   const { parts, audit, actorLabel, setActorLabel, hydrated, restoreFromBackupJson } = useInventory()
-  const { isViewer, isAdmin, hasAdminPin, setAdminPin, clearAdminPin } = useSimpleAccess()
+  const { isViewer, hasAdminPin, setAdminPin, clearAdminPin, tryUnlock } = useSimpleAccess()
+  const { theme, setTheme } = useTheme()
+  const isCloud = isCloudTeamMode()
   const backupInputRef = useRef<HTMLInputElement>(null)
   const [dataPath, setDataPath] = useState<string | null>(null)
   const [backupMsg, setBackupMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [pinNew, setPinNew] = useState('')
   const [pinMsg, setPinMsg] = useState<string | null>(null)
+  const [pinMsgType, setPinMsgType] = useState<'ok' | 'err'>('ok')
+  const [pinSaving, setPinSaving] = useState(false)
+  const [pinUnlockOpen, setPinUnlockOpen] = useState(false)
+  const [auditOpen, setAuditOpen] = useState(false)
 
   const [startOnKayit, setStartOnKayit] = useState(false)
   const [aiProvider, setAiProvider] = useState<'groq' | 'gemini'>('groq')
@@ -46,6 +106,9 @@ export function SettingsPage() {
   const [groqSaveMessage, setGroqSaveMessage] = useState('')
   const [geminiSaveStatus, setGeminiSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
   const [geminiSaveMessage, setGeminiSaveMessage] = useState('')
+  const [resendKey, setResendKey] = useState('')
+  const [resendFrom, setResendFrom] = useState('')
+  const [resendSaveStatus, setResendSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
     void (async () => {
@@ -67,6 +130,8 @@ export function SettingsPage() {
       setAiProvider(p === 'gemini' ? 'gemini' : 'groq')
       setGroqKey(localStorage.getItem(LS_GROQ_API_KEY) ?? '')
       setGeminiKey(localStorage.getItem(LS_GEMINI_API_KEY) ?? '')
+      setResendKey(localStorage.getItem(LS_RESEND_API_KEY) ?? '')
+      setResendFrom(localStorage.getItem(LS_RESEND_FROM) ?? '')
     } catch {
       setStartOnKayit(false)
       setAiProvider('groq')
@@ -74,6 +139,30 @@ export function SettingsPage() {
       setGeminiKey('')
     }
   }, [])
+
+  async function handlePinSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (isViewer) return
+    const t = pinNew.trim()
+    if (t.length < 4) {
+      setPinMsgType('err')
+      setPinMsg('PIN en az 4 karakter olmalı.')
+      return
+    }
+    setPinSaving(true)
+    setPinMsg(null)
+    try {
+      await setAdminPin(t)
+      setPinNew('')
+      setPinMsgType('ok')
+      setPinMsg('PIN kaydedildi. Düzenleme için bu PIN gerekir.')
+    } catch {
+      setPinMsgType('err')
+      setPinMsg('PIN kaydedilemedi.')
+    } finally {
+      setPinSaving(false)
+    }
+  }
 
   function toggleStart(v: boolean) {
     if (isViewer) return
@@ -96,8 +185,8 @@ export function SettingsPage() {
     }
   }
 
-  function persistGroqKey(): boolean {
-    if (isViewer) return false
+  function persistGroqKey() {
+    if (isViewer) return
     const v = normalizeApiKeyInput(groqKey)
     if (v !== groqKey) setGroqKey(v)
     try {
@@ -105,17 +194,15 @@ export function SettingsPage() {
       else localStorage.removeItem(LS_GROQ_API_KEY)
       setGroqSaveStatus('saved')
       setGroqSaveMessage(v ? 'Groq anahtarı kaydedildi.' : 'Groq anahtarı silindi.')
-      return true
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setGroqSaveStatus('error')
       setGroqSaveMessage(`Kaydedilemedi: ${msg}`)
-      return false
     }
   }
 
-  function persistGeminiKey(): boolean {
-    if (isViewer) return false
+  function persistGeminiKey() {
+    if (isViewer) return
     const v = normalizeApiKeyInput(geminiKey)
     if (v !== geminiKey) setGeminiKey(v)
     try {
@@ -123,23 +210,22 @@ export function SettingsPage() {
       else localStorage.removeItem(LS_GEMINI_API_KEY)
       setGeminiSaveStatus('saved')
       setGeminiSaveMessage(v ? 'Gemini anahtarı kaydedildi.' : 'Gemini anahtarı silindi.')
-      return true
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setGeminiSaveStatus('error')
       setGeminiSaveMessage(`Kaydedilemedi: ${msg}`)
-      return false
     }
   }
 
-  function onGroqForm(e: FormEvent) {
-    e.preventDefault()
-    persistGroqKey()
-  }
-
-  function onGeminiKeyForm(e: FormEvent) {
-    e.preventDefault()
-    persistGeminiKey()
+  function saveResend() {
+    if (isViewer) return
+    try {
+      localStorage.setItem(LS_RESEND_API_KEY, normalizeApiKeyInput(resendKey))
+      localStorage.setItem(LS_RESEND_FROM, resendFrom.trim() || 'LabStock <onboarding@resend.dev>')
+      setResendSaveStatus('saved')
+    } catch {
+      setResendSaveStatus('error')
+    }
   }
 
   function exportJsonBackup() {
@@ -177,59 +263,118 @@ export function SettingsPage() {
     if (backupInputRef.current) backupInputRef.current.value = ''
   }
 
+  const recentAudit = [...audit].reverse().slice(0, 80)
+
   return (
-    <main className="mx-auto min-h-0 w-full max-w-2xl flex-1 overflow-y-auto bg-ls-canvas px-4 py-6 sm:px-8">
-      <p className="text-2xs font-semibold uppercase tracking-[0.1em] text-teal-700/90">Tercihler</p>
-      <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">Ayarlar</h2>
-      <p className="mt-1 text-sm text-slate-600">Uygulama tercihleri (yerel; tarayıcı depolama).</p>
+    <div className="ls-page">
+      <AdminUnlockModal
+        open={pinUnlockOpen}
+        onClose={() => setPinUnlockOpen(false)}
+        onSubmit={tryUnlock}
+      />
+
+      <header className="ls-page-header">
+        <h1>Ayarlar</h1>
+        <p>Hesap, görünüm, yapay zeka ve yedekleme — tek sayfada gruplandı.</p>
+      </header>
 
       {isViewer ? (
-        <p className="mt-6 rounded-xl border border-amber-200 bg-amber-50/90 px-4 py-3 text-sm text-amber-950 shadow-card">
-          <strong className="font-semibold">Salt okunur modu:</strong> ayarları ve yedeği yalnızca yönetici değiştirebilir.
-          Üst menüden PIN ile oturum açın.
+        <p className="ls-alert-warn">
+          <strong className="font-semibold">Salt okunur:</strong> değişiklik için yönetici PIN ile giriş yapın.
         </p>
       ) : null}
 
-      <section className="mt-8 space-y-5">
-        <div className="ls-card p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Genel</h3>
-          <label className={`mt-4 flex items-start gap-3 ${isViewer ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
-            <input
-              type="checkbox"
-              checked={startOnKayit}
-              disabled={isViewer}
-              onChange={(e) => toggleStart(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-ls-line text-teal-600 focus:ring-teal-500/40 disabled:opacity-50"
-            />
-            <span>
-              <span className="block text-sm font-medium text-slate-800">Açılışta Kayıt sayfasını göster</span>
-              <span className="mt-0.5 block text-xs text-slate-600">
-                Kapalıyken uygulama Giriş (depo asistanı) ekranıyla başlar.
+      <div className="ls-settings-layout">
+        {/* Görünüm + genel */}
+        <div className="ls-settings-row">
+          <SettingsSection title="Görünüm" description="Tercih bu cihazda saklanır.">
+            <div className="ls-segment-track w-full sm:w-auto" role="group" aria-label="Tema">
+              <button
+                type="button"
+                className={theme === 'light' ? 'ls-segment ls-segment-active' : 'ls-segment'}
+                onClick={() => setTheme('light')}
+              >
+                Açık
+              </button>
+              <button
+                type="button"
+                className={theme === 'dark' ? 'ls-segment ls-segment-active' : 'ls-segment'}
+                onClick={() => setTheme('dark')}
+              >
+                Koyu
+              </button>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection title="Genel">
+            <label
+              className={`flex items-start gap-3 ${isViewer ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
+            >
+              <input
+                type="checkbox"
+                checked={startOnKayit}
+                disabled={isViewer}
+                onChange={(e) => toggleStart(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-ls-line text-ls-accent focus:ring-ls-accent/40 disabled:opacity-50"
+              />
+              <span>
+                <span className="block text-sm font-medium text-ls-text">Açılışta Kayıt sayfası</span>
+                <span className="mt-0.5 block text-xs text-ls-text-muted">
+                  Kapalıyken uygulama Depo (giriş) ekranıyla başlar.
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          </SettingsSection>
         </div>
 
-        <div className="ls-card p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Basit erişim</h3>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            PIN kayıtlıyken bu cihazda liste herkese açık; stok değişikliği ve ayarlar için üst menüden yönetici PIN’i
-            gerekir. PIN yoksa herkes yönetici sayılır.
-          </p>
-          {isViewer ? (
-            <p className="mt-4 text-sm font-medium text-amber-900">
-              PIN’i yalnızca yönetici oturumu değiştirebilir.
-            </p>
-          ) : (
-            <>
-              <p className="mt-3 text-2xs text-slate-500">
-                Durum: {hasAdminPin ? 'PIN aktif (salt okunur varsayılan)' : 'PIN yok — herkes düzenleyebilir'}
-              </p>
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label htmlFor="admin-pin-new" className="text-xs font-semibold text-slate-700">
-                    Yeni PIN {hasAdminPin ? '(değiştirmek için)' : ''}
-                  </label>
+        {/* Hesap + PIN */}
+        <div className="ls-settings-row">
+          <SettingsSection title="Hesap" badge={modeLabel}>
+            {user ? (
+              <div className="ls-settings-kv">
+                <span className="ls-settings-kv-label">Oturum</span>
+                <span className="ls-settings-kv-value truncate">{user.email}</span>
+              </div>
+            ) : null}
+            <div className="ls-settings-actions">
+              <button
+                type="button"
+                onClick={() => {
+                  void logout()
+                  navigate('/', { replace: true })
+                }}
+                className="ls-btn-secondary"
+              >
+                Çıkış yap
+              </button>
+            </div>
+          </SettingsSection>
+
+          <SettingsSection
+            title="Basit erişim"
+            description="PIN ile stok düzenleme ve ayarlar korunur; liste herkese açık kalır."
+          >
+            <div className="ls-settings-kv">
+              <span className="ls-settings-kv-label">Durum</span>
+              <span className="ls-settings-kv-value text-right text-xs sm:text-sm">
+                {hasAdminPin ? 'PIN aktif' : 'PIN yok — herkes düzenler'}
+              </span>
+            </div>
+
+            {isViewer ? (
+              <div className="space-y-3">
+                <p className="text-sm text-ls-warn">PIN değiştirmek için yönetici oturumu açın.</p>
+                <button type="button" onClick={() => setPinUnlockOpen(true)} className="ls-btn-primary w-full sm:w-auto">
+                  Yönetici PIN ile giriş
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={(e) => void handlePinSubmit(e)} className="space-y-3">
+                <SettingsField
+                  label={hasAdminPin ? 'Yeni PIN' : 'Yönetici PIN belirle'}
+                  htmlFor="admin-pin-new"
+                  hint="En az 4 karakter. Kaydet ile bu cihazda saklanır."
+                >
                   <input
                     id="admin-pin-new"
                     type="password"
@@ -239,244 +384,213 @@ export function SettingsPage() {
                       setPinNew(e.target.value)
                       setPinMsg(null)
                     }}
-                    className="ls-input mt-2 py-2.5"
-                    placeholder={hasAdminPin ? '••••••' : 'En az 4 karakter önerilir'}
+                    className="ls-input"
+                    placeholder="••••"
+                    minLength={4}
                   />
+                </SettingsField>
+                <div className="ls-settings-actions">
+                  <button type="submit" disabled={pinSaving} className="ls-btn-primary">
+                    {pinSaving ? 'Kaydediliyor…' : 'PIN kaydet'}
+                  </button>
+                  {hasAdminPin ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        clearAdminPin()
+                        setPinMsgType('ok')
+                        setPinMsg('PIN kaldırıldı; herkes düzenleyebilir.')
+                      }}
+                      className="ls-btn-ghost text-ls-danger hover:text-ls-danger"
+                    >
+                      PIN kaldır
+                    </button>
+                  ) : null}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void (async () => {
-                      await setAdminPin(pinNew)
-                      setPinNew('')
-                      setPinMsg('PIN kaydedildi. PIN bilen yönetici düzenleme yapabilir.')
-                    })()
-                  }}
-                  disabled={!pinNew.trim()}
-                  className="shrink-0 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-bubble transition hover:brightness-110 disabled:opacity-40"
-                >
-                  PIN kaydet
-                </button>
-              </div>
-              {hasAdminPin ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearAdminPin()
-                    setPinMsg('PIN kaldırıldı; herkes yönetici.')
-                  }}
-                  className="mt-3 text-sm font-semibold text-red-700 underline-offset-2 hover:underline"
-                >
-                  PIN’i kaldır (herkes düzenler)
-                </button>
-              ) : null}
-              {pinMsg ? (
-                <p className="mt-3 text-sm font-medium text-teal-800" role="status">
-                  {pinMsg}
-                </p>
-              ) : null}
-            </>
-          )}
+                {pinMsg ? <SettingsStatus type={pinMsgType}>{pinMsg}</SettingsStatus> : null}
+              </form>
+            )}
+          </SettingsSection>
         </div>
 
-        <div className="ls-card p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Yapay zeka — bulut sohbet</h3>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Giriş ekranındaki sohbet <strong className="font-semibold text-slate-800">internet üzerinden</strong> çalışır; her
-            gönderimde güncel stok listeniz modele eklenir. İstekler Electron ana sürecinden gider (CORS yok).{' '}
-            <strong className="font-semibold text-slate-800">Groq</strong> genelde cömert ücretsiz kotayla önerilir;{' '}
-            <strong className="font-semibold text-slate-800">Gemini</strong> alternatiftir. İki anahtarı da kaydederseniz
-            Gemini 429 verdiğinde uygulama otomatik Groq dener.
-          </p>
+        {/* E-posta doğrulama */}
+        {isCloud ? (
+          <SettingsSection
+            title="E-posta doğrulama"
+            badge="Supabase"
+            description="Kayıt kodları Supabase Auth üzerinden gönderilir; ek Resend ayarı gerekmez."
+          />
+        ) : (
+          <SettingsSection
+            title="E-posta doğrulama"
+            description="Yerel modda kayıt sırasında doğrulama kodu için Resend kullanılır."
+          >
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                saveResend()
+              }}
+            >
+              <SettingsField label="Resend API anahtarı" htmlFor="resend-key" link={{ href: RESEND_KEY_URL, label: 'Anahtar al →' }}>
+                <input
+                  id="resend-key"
+                  type="password"
+                  autoComplete="off"
+                  disabled={isViewer}
+                  value={resendKey}
+                  onChange={(e) => {
+                    setResendKey(e.target.value)
+                    setResendSaveStatus('idle')
+                  }}
+                  className="ls-input w-full"
+                  placeholder="re_…"
+                />
+              </SettingsField>
+              <SettingsField label="Gönderen (From)" htmlFor="resend-from" hint="Örn. LabStock &lt;onboarding@resend.dev&gt;">
+                <input
+                  id="resend-from"
+                  type="text"
+                  disabled={isViewer}
+                  value={resendFrom}
+                  onChange={(e) => {
+                    setResendFrom(e.target.value)
+                    setResendSaveStatus('idle')
+                  }}
+                  className="ls-input w-full"
+                  placeholder="LabStock <onboarding@resend.dev>"
+                />
+              </SettingsField>
+              <button type="submit" disabled={isViewer} className="ls-btn-primary">
+                Kaydet
+              </button>
+              {resendSaveStatus === 'saved' ? <SettingsStatus type="ok">Kaydedildi.</SettingsStatus> : null}
+              {resendSaveStatus === 'error' ? <SettingsStatus type="err">Kaydedilemedi.</SettingsStatus> : null}
+            </form>
+          </SettingsSection>
+        )}
 
-          <p className="mt-4 text-2xs font-semibold uppercase tracking-[0.08em] text-slate-500">Aktif sağlayıcı</p>
-          <div className="mt-2 flex flex-wrap gap-3">
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-ls-line bg-slate-50/80 px-3 py-2.5 shadow-card transition has-[:checked]:border-teal-400/70 has-[:checked]:bg-teal-50/60">
-              <input
-                type="radio"
-                name="ai-provider"
-                checked={aiProvider === 'groq'}
-                disabled={isViewer}
-                onChange={() => setProvider('groq')}
-                className="text-teal-600 focus:ring-teal-500/40"
-              />
-              <span className="text-sm font-medium text-slate-800">Groq (önerilen)</span>
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-ls-line bg-slate-50/80 px-3 py-2.5 shadow-card transition has-[:checked]:border-teal-400/70 has-[:checked]:bg-teal-50/60">
-              <input
-                type="radio"
-                name="ai-provider"
-                checked={aiProvider === 'gemini'}
-                disabled={isViewer}
-                onChange={() => setProvider('gemini')}
-                className="text-teal-600 focus:ring-teal-500/40"
-              />
-              <span className="text-sm font-medium text-slate-800">Google Gemini</span>
-            </label>
+        {/* Yapay zeka */}
+        <SettingsSection
+          title="Yapay zeka — depo sohbeti"
+          description="İstekler Electron üzerinden gider. Groq önerilir; Gemini 429 verirse otomatik Groq denenir."
+        >
+          <div>
+            <p className="ls-label mb-2">Aktif sağlayıcı</p>
+            <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Yapay zeka sağlayıcısı">
+              <label className="ls-settings-provider">
+                <input
+                  type="radio"
+                  name="ai-provider"
+                  checked={aiProvider === 'groq'}
+                  disabled={isViewer}
+                  onChange={() => setProvider('groq')}
+                />
+                Groq (önerilen)
+              </label>
+              <label className="ls-settings-provider">
+                <input
+                  type="radio"
+                  name="ai-provider"
+                  checked={aiProvider === 'gemini'}
+                  disabled={isViewer}
+                  onChange={() => setProvider('gemini')}
+                />
+                Google Gemini
+              </label>
+            </div>
           </div>
 
-          <form onSubmit={onGroqForm} className="mt-6 space-y-2 border-t border-ls-line/80 pt-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <label htmlFor="groq-key" className="text-xs font-semibold text-slate-700">
-                Groq API anahtarı
-              </label>
-              <a
-                href={GROQ_KEY_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-semibold text-teal-700 underline-offset-2 hover:underline"
-              >
-                Ücretsiz anahtar al →
-              </a>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-              <input
+          <div className="grid gap-5 border-t border-ls-line/80 pt-4 lg:grid-cols-2">
+            <SettingsField label="Groq API anahtarı" htmlFor="groq-key" link={{ href: GROQ_KEY_URL, label: 'Ücretsiz anahtar →' }}>
+              <ApiKeyRow
                 id="groq-key"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
                 value={groqKey}
+                placeholder="gsk_…"
                 disabled={isViewer}
-                onChange={(e) => {
-                  setGroqKey(e.target.value)
+                onChange={(v) => {
+                  setGroqKey(v)
                   setGroqSaveStatus('idle')
                   setGroqSaveMessage('')
                 }}
-                placeholder="gsk_…"
-                className="ls-input min-w-0 flex-1 py-2.5"
+                onSubmit={persistGroqKey}
               />
-              <button
-                type="submit"
-                disabled={isViewer}
-                className="shrink-0 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:bg-slate-800 disabled:opacity-40"
-              >
-                Kaydet
-              </button>
-            </div>
-            {groqSaveStatus === 'saved' ? (
-              <p className="text-sm font-medium text-teal-800" role="status">
-                {groqSaveMessage}
-              </p>
-            ) : null}
-            {groqSaveStatus === 'error' ? (
-              <p className="text-sm font-medium text-red-700" role="alert">
-                {groqSaveMessage}
-              </p>
-            ) : null}
-          </form>
+              {groqSaveStatus !== 'idle' ? (
+                <SettingsStatus type={groqSaveStatus === 'saved' ? 'ok' : 'err'}>{groqSaveMessage}</SettingsStatus>
+              ) : null}
+            </SettingsField>
 
-          <form onSubmit={onGeminiKeyForm} className="mt-6 space-y-2 border-t border-ls-line/80 pt-5">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <label htmlFor="gemini-key" className="text-xs font-semibold text-slate-700">
-                Gemini API anahtarı
-              </label>
-              <a
-                href={GEMINI_KEY_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-semibold text-teal-700 underline-offset-2 hover:underline"
-              >
-                AI Studio →
-              </a>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
-              <input
+            <SettingsField label="Gemini API anahtarı" htmlFor="gemini-key" link={{ href: GEMINI_KEY_URL, label: 'AI Studio →' }}>
+              <ApiKeyRow
                 id="gemini-key"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
                 value={geminiKey}
+                placeholder="AIza…"
                 disabled={isViewer}
-                onChange={(e) => {
-                  setGeminiKey(e.target.value)
+                onChange={(v) => {
+                  setGeminiKey(v)
                   setGeminiSaveStatus('idle')
                   setGeminiSaveMessage('')
                 }}
-                placeholder="AIza…"
-                className="ls-input min-w-0 flex-1 py-2.5"
+                onSubmit={persistGeminiKey}
+                submitPrimary
               />
-              <button
-                type="submit"
-                disabled={isViewer}
-                className="shrink-0 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-bubble transition hover:brightness-110 disabled:opacity-40"
-              >
-                Kaydet
-              </button>
-            </div>
-            {geminiSaveStatus === 'saved' ? (
-              <p className="text-sm font-medium text-teal-800" role="status">
-                {geminiSaveMessage}
-              </p>
-            ) : null}
-            {geminiSaveStatus === 'error' ? (
-              <p className="text-sm font-medium text-red-700" role="alert">
-                {geminiSaveMessage}
-              </p>
-            ) : null}
-          </form>
+              {geminiSaveStatus !== 'idle' ? (
+                <SettingsStatus type={geminiSaveStatus === 'saved' ? 'ok' : 'err'}>{geminiSaveMessage}</SettingsStatus>
+              ) : null}
+            </SettingsField>
+          </div>
 
-          <p className="mt-4 text-xs leading-relaxed text-slate-500">
-            Yerel hızlı özet için Kayıt ekranı ve{' '}
-            <code className="rounded-md border border-ls-line bg-slate-100 px-1.5 py-0.5 font-mono text-[0.8rem] text-slate-800">
-              termExpansions.ts
-            </code>{' '}
-            kullanılmaya devam eder; bulut kesildiğinde sohbet otomatik olarak yerel metne düşer.
+          <p className="text-2xs leading-relaxed text-ls-text-muted">
+            Yerel hızlı özet Kayıt ekranında çalışmaya devam eder; bulut kesilirse sohbet otomatik yerel metne düşer.
           </p>
-        </div>
+        </SettingsSection>
 
-        <div className="ls-card p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Veri ve yedek</h3>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            Stok ve denetim günlüğü otomatik kaydedilir: masaüstünde uygulama veri klasöründeki dosya + tarayıcıda{' '}
-            <code className="rounded bg-slate-100 px-1 font-mono text-xs">localStorage</code> yedeği.
-          </p>
-
-          <div className="mt-4">
-            <label htmlFor="actor-label" className="text-xs font-semibold text-slate-700">
-              Denetim günlüğünde görünen ad
-            </label>
+        {/* Veri */}
+        <SettingsSection
+          title="Veri ve yedek"
+          description="Stok ve denetim günlüğü otomatik kaydedilir (Electron dosyası + tarayıcı yedeği)."
+        >
+          <SettingsField
+            label="Denetim günlüğünde görünen ad"
+            htmlFor="actor-label"
+            hint="Adet değişimleri ve içe aktarmalar bu etiketle kaydedilir."
+          >
             <input
               id="actor-label"
               type="text"
               value={actorLabel}
               onChange={(e) => setActorLabel(e.target.value)}
-              className="ls-input mt-2 py-2.5"
+              className="ls-input"
               placeholder="Örn. Ahmet · Laboratuvar"
               disabled={!hydrated || isViewer}
             />
-            <p className="mt-1 text-2xs text-slate-500">Adet değişimleri ve içe aktarmalar bu etiketle kaydedilir.</p>
-          </div>
+          </SettingsField>
 
           {dataPath ? (
-            <p className="mt-4 break-all rounded-xl border border-ls-line bg-slate-50/80 px-3 py-2 font-mono text-2xs text-slate-600">
-              <span className="font-sans font-semibold text-slate-700">Kalıcı dosya: </span>
+            <p className="break-all rounded-lg border border-ls-line bg-ls-muted/60 px-3 py-2 font-mono text-2xs text-ls-text-muted">
+              <span className="font-sans font-semibold">Kalıcı dosya: </span>
               {dataPath}
             </p>
           ) : (
-            <p className="mt-4 text-xs text-slate-500">
-              Kalıcı dosya yolu yalnızca Electron (masaüstü) sürümünde gösterilir; tarayıcıda yalnızca yerel depolama kullanılır.
+            <p className="text-xs text-ls-text-muted">
+              Kalıcı dosya yolu yalnızca Electron sürümünde gösterilir.
             </p>
           )}
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={exportJsonBackup}
-              disabled={!hydrated}
-              className="rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-bubble transition hover:brightness-110 disabled:opacity-40"
-            >
-              JSON yedek indir
+          <div className="ls-settings-actions">
+            <button type="button" onClick={exportJsonBackup} disabled={!hydrated} className="ls-btn-primary">
+              JSON indir
             </button>
             <button
               type="button"
               onClick={exportExcelStock}
               disabled={!hydrated || parts.length === 0}
-              className="rounded-xl border border-ls-line bg-ls-surface px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-card transition hover:bg-slate-50 disabled:opacity-40"
+              className="ls-btn-secondary"
             >
-              Excel stok indir
+              Excel indir
             </button>
-            <label className="inline-flex cursor-pointer items-center rounded-xl border border-ls-line bg-ls-surface px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-card transition hover:bg-slate-50">
-              <span>JSON yedek yükle</span>
+            <label className="ls-btn-secondary cursor-pointer">
+              <span>JSON yükle</span>
               <input
                 ref={backupInputRef}
                 type="file"
@@ -487,60 +601,64 @@ export function SettingsPage() {
               />
             </label>
           </div>
-          {backupMsg ? (
-            <p
-              className={`mt-3 text-sm font-medium ${backupMsg.type === 'ok' ? 'text-teal-800' : 'text-red-700'}`}
-              role="status"
+
+          {backupMsg ? <SettingsStatus type={backupMsg.type}>{backupMsg.text}</SettingsStatus> : null}
+
+          <div className="border-t border-ls-line/80 pt-2">
+            <button
+              type="button"
+              className="ls-settings-audit-toggle"
+              aria-expanded={auditOpen}
+              onClick={() => setAuditOpen((o) => !o)}
             >
-              {backupMsg.text}
-            </p>
-          ) : null}
-
-          <div className="mt-8 border-t border-ls-line/80 pt-5">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Son işlemler (denetim)</h4>
-            <p className="mt-1 text-2xs text-slate-500">En fazla son {Math.min(audit.length, 80)} kayıt gösterilir.</p>
-            <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-ls-line bg-slate-50/50">
-              {audit.length === 0 ? (
-                <p className="p-4 text-sm text-slate-500">Henüz kayıt yok.</p>
-              ) : (
-                <ul className="divide-y divide-ls-line text-left text-xs">
-                  {[...audit].reverse().slice(0, 80).map((a) => (
-                    <li key={a.id} className="px-3 py-2.5 text-slate-700">
-                      <span className="font-mono text-2xs text-slate-500">
-                        {new Date(a.at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
-                      </span>
-                      <span className="mx-2 text-slate-300">·</span>
-                      <span className="font-semibold text-slate-800">{a.actor}</span>
-                      <span className="mx-1.5 text-slate-400">—</span>
-                      <span className="text-slate-600">{auditActionLabel[a.action] ?? a.action}</span>
-                      {a.mpn && a.mpn !== '—' ? (
-                        <>
-                          <span className="mx-1.5 text-slate-400">·</span>
-                          <span className="font-mono text-teal-900">{a.mpn}</span>
-                          {a.action === 'delta' ? (
-                            <span className="tabular-nums text-slate-600">
-                              {' '}
-                              ({a.delta > 0 ? '+' : ''}
-                              {a.delta} → {a.quantityAfter})
-                            </span>
-                          ) : null}
-                        </>
-                      ) : null}
-                      {a.note ? <p className="mt-1 text-2xs text-slate-500">{a.note}</p> : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+              <span>Denetim günlüğü</span>
+              <span className="ls-badge tabular-nums">{audit.length} kayıt</span>
+            </button>
+            {auditOpen ? (
+              <div className="ls-settings-audit-panel mt-2">
+                {recentAudit.length === 0 ? (
+                  <p className="p-4 text-sm text-ls-text-muted">Henüz kayıt yok.</p>
+                ) : (
+                  <ul>
+                    {recentAudit.map((a) => (
+                      <li key={a.id} className="ls-settings-audit-item">
+                        <span className="font-mono text-2xs">
+                          {new Date(a.at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}
+                        </span>
+                        <span className="mx-1.5 text-ls-line-strong">·</span>
+                        <span className="font-semibold text-ls-text">{a.actor}</span>
+                        <span className="mx-1 text-ls-line-strong">—</span>
+                        <span>{auditActionLabel[a.action] ?? a.action}</span>
+                        {a.mpn && a.mpn !== '—' ? (
+                          <>
+                            <span className="mx-1 text-ls-line-strong">·</span>
+                            <span className="font-mono text-ls-accent">{a.mpn}</span>
+                            {a.action === 'delta' ? (
+                              <span className="tabular-nums">
+                                {' '}
+                                ({a.delta > 0 ? '+' : ''}
+                                {a.delta} → {a.quantityAfter})
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
+                        {a.note ? <p className="mt-1 text-2xs opacity-90">{a.note}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
           </div>
-        </div>
+        </SettingsSection>
 
-        <div className="ls-card p-5">
-          <h3 className="text-sm font-semibold text-slate-900">Hakkında</h3>
-          <p className="mt-2 text-sm text-slate-600">LabStock Assistant · Elektronik bileşen envanteri</p>
-          <p className="mt-1 text-xs text-slate-500">Sürüm 0.1.0</p>
-        </div>
-      </section>
-    </main>
+        <footer className="ls-settings-about">
+          <span>
+            <strong className="font-medium text-ls-text">LabStock Assistant</strong> · Elektronik bileşen envanteri
+          </span>
+          <span className="tabular-nums text-xs">Sürüm 0.1.0</span>
+        </footer>
+      </div>
+    </div>
   )
 }

@@ -7,10 +7,13 @@ import pkg from './package.json'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ command }) => {
-  rmSync('dist-electron', { recursive: true, force: true })
-
   const isServe = command === 'serve'
   const isBuild = command === 'build'
+
+  // Yalnızca production build'de temizle; serve sırasında silmek çalışan Electron'u bozar (boş sayfa).
+  if (isBuild) {
+    rmSync('dist-electron', { recursive: true, force: true })
+  }
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG
 
   return {

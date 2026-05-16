@@ -6,6 +6,7 @@ import os from 'node:os'
 import { depoChat, type DepoChatPayload } from './depoChat'
 import { geminiGenerateContent, type GeminiAskPayload } from './gemini'
 import { getLabstockDataPath, loadLabstockDataFile, saveLabstockDataFile } from './persistence'
+import { sendResendEmail, type ResendSendPayload } from './resend'
 import { update } from './update'
 
 const require = createRequire(import.meta.url)
@@ -46,6 +47,24 @@ let win: BrowserWindow | null = null
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
 
+/** Vite hazır olmadan Electron açılırsa boş sayfa olur; kısa aralıklarla yeniden dene. */
+async function loadDevServerWithRetry(
+  browserWin: BrowserWindow,
+  url: string,
+  maxAttempts = 40,
+): Promise<void> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (browserWin.isDestroyed()) return
+    try {
+      await browserWin.loadURL(url)
+      return
+    } catch {
+      await new Promise((r) => setTimeout(r, Math.min(250 * attempt, 2000)))
+    }
+  }
+  console.error('[electron] Dev sunucuya bağlanılamadı:', url)
+}
+
 async function createWindow() {
   win = new BrowserWindow({
     title: 'LabStock Assistant',
@@ -73,10 +92,20 @@ async function createWindow() {
   })
 
   if (VITE_DEV_SERVER_URL) { // #298
-    win.loadURL(VITE_DEV_SERVER_URL)
+    const devUrl = VITE_DEV_SERVER_URL
+    void loadDevServerWithRetry(win, devUrl)
     if (process.env.OPEN_DEVTOOLS === '1') {
       win.webContents.openDevTools({ mode: 'detach' })
     }
+    win.webContents.on('did-fail-load', (_event, errorCode, _desc, validatedURL) => {
+      // ERR_ABORTED (-3): yeni yükleme başladığında önceki istek iptal edilir
+      if (errorCode === -3) return
+      if (validatedURL.startsWith(devUrl)) {
+        setTimeout(() => {
+          if (win && !win.isDestroyed()) void loadDevServerWithRetry(win, devUrl, 5)
+        }, 800)
+      }
+    })
   } else {
     win.loadFile(indexHtml)
   }
@@ -158,4 +187,8 @@ ipcMain.handle('labstock:persistence-save', async (_event, json: string) => {
 
 ipcMain.handle('labstock:persistence-path', () => {
   return getLabstockDataPath()
+})
+
+ipcMain.handle('labstock:resend-send', async (_event, payload: ResendSendPayload) => {
+  return sendResendEmail(payload)
 })

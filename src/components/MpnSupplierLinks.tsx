@@ -2,20 +2,25 @@ import { digikeySearchUrl, lcscSearchUrl, mouserSearchUrl } from '@/lib/mpnSuppl
 
 type Props = { mpn: string }
 
-const linkCls =
-  'inline-flex items-center rounded-md border border-ls-line bg-white px-1.5 py-0.5 text-2xs font-semibold text-slate-600 shadow-card transition hover:border-teal-300 hover:text-teal-800'
-
 export function MpnSupplierLinks({ mpn }: Props) {
   const q = mpn.trim()
   if (!q) return null
+  const linkCls =
+    'text-xs text-ls-text-muted transition hover:text-ls-accent hover:underline underline-offset-2'
   return (
-    <span className="flex flex-wrap items-center gap-1" title="Tedarikçi sitelerinde MPN ara">
+    <span className="flex flex-wrap items-center gap-x-2" title="Tedarikçi sitelerinde MPN ara">
       <a href={lcscSearchUrl(q)} target="_blank" rel="noreferrer" className={linkCls}>
         LCSC
       </a>
+      <span className="text-ls-line" aria-hidden>
+        ·
+      </span>
       <a href={mouserSearchUrl(q)} target="_blank" rel="noreferrer" className={linkCls}>
         Mouser
       </a>
+      <span className="text-ls-line" aria-hidden>
+        ·
+      </span>
       <a href={digikeySearchUrl(q)} target="_blank" rel="noreferrer" className={linkCls}>
         DigiKey
       </a>

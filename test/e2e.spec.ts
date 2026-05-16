@@ -15,8 +15,45 @@ import {
 } from 'vitest'
 
 const root = path.join(__dirname, '..')
+const E2E_EMAIL = 'e2e@labstock.test'
+const E2E_PASSWORD = 'testpass123'
+
 let electronApp: ElectronApplication
 let page: Page
+
+async function ensureLoggedIn(p: Page) {
+  const email = p.locator('#auth-email')
+  const visible = await email.isVisible().catch(() => false)
+  if (!visible) return
+
+  await email.fill(E2E_EMAIL)
+  await p.locator('#auth-password').fill(E2E_PASSWORD)
+  await p.getByTestId('auth-submit').click()
+  await p.waitForTimeout(800)
+
+  const stillAuth = await email.isVisible().catch(() => false)
+  if (stillAuth) {
+    await p.getByTestId('auth-switch-register').click()
+    await email.fill(E2E_EMAIL)
+    await p.getByTestId('auth-send-code').click()
+    await p.waitForTimeout(600)
+    const devCode = await p.getByTestId('auth-dev-code').textContent()
+    if (devCode?.trim()) {
+      await p.locator('#auth-otp').fill(devCode.trim())
+    }
+    await p.getByTestId('auth-verify-code').click()
+    await p.waitForTimeout(500)
+    await p.locator('#auth-password').fill(E2E_PASSWORD)
+    await p.locator('#auth-password2').fill(E2E_PASSWORD)
+    await p.getByTestId('auth-submit').click()
+    await p.waitForTimeout(500)
+    await email.fill(E2E_EMAIL)
+    await p.locator('#auth-password').fill(E2E_PASSWORD)
+    await p.getByTestId('auth-submit').click()
+  }
+
+  await p.waitForURL(/#\/app/, { timeout: 15000 })
+}
 
 async function ensureKayit(p: Page) {
   if (await p.$('#stock-search')) return
@@ -25,7 +62,6 @@ async function ensureKayit(p: Page) {
 }
 
 if (process.platform === 'linux') {
-  // pass ubuntu
   test(() => expect(true).true)
 } else {
   beforeAll(async () => {
@@ -40,6 +76,8 @@ if (process.platform === 'linux') {
     await mainWin.evaluate(async (win) => {
       win.webContents.executeJavaScript('console.log("Execute JavaScript with e2e testing.")')
     })
+
+    await ensureLoggedIn(page)
   })
 
   afterAll(async () => {
@@ -54,18 +92,16 @@ if (process.platform === 'linux') {
       expect(title).eq('LabStock Assistant')
     })
 
-    test('giriş (landing) başlığı', async () => {
-      const h1 = await page.$('h1')
-      const text = await h1?.textContent()
-      expect(text).eq('Depo girişi')
+    test('depo ana sayfa', async () => {
+      await page.goto(`${await page.url()}`.replace(/#.*$/, '') + '#/app')
+      await page.waitForSelector('h1', { timeout: 15000 })
+      const text = await page.$eval('h1', (el) => el.textContent)
+      expect(text).eq('Hoş geldiniz')
     })
 
-    test('sohbet başlığı', async () => {
+    test('sohbet paneli', async () => {
       await page.getByTestId('nav-sohbet').click()
-      await page.waitForSelector('h1', { timeout: 15000 })
-      const h1 = await page.$('h1')
-      const text = await h1?.textContent()
-      expect(text).eq('Depo asistanı')
+      await page.waitForSelector('text=Depo asistanı', { timeout: 15000 })
     })
 
     test('stok arama kutusu (Kayıt sayfası)', async () => {
