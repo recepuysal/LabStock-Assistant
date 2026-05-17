@@ -30,10 +30,12 @@ export type LabStockGeminiPayload = {
 }
 
 export type LabStockDepoChatPayload = {
-  provider: 'groq' | 'gemini'
+  provider: 'groq' | 'gemini' | 'ollama'
   apiKey: string
   inventoryJson: string
   history: Array<{ role: 'user' | 'assistant'; content: string }>
+  ollamaBaseUrl?: string
+  ollamaModel?: string
 }
 
 export type PersistenceLoadResult =

@@ -89,11 +89,11 @@ export function KayitPage() {
 
       {geminiKeyHint ? (
         <p className="ls-alert-warn shrink-0">
-          Sohbet için{' '}
+          Sohbet ücretsiz yerel modda çalışır. İsteğe bağlı gelişmiş AI için{' '}
           <Link to="/app/ayarlar" className="font-semibold underline-offset-2 hover:underline">
             Ayarlar
           </Link>
-          ’dan API anahtarı ekleyin.
+          .
         </p>
       ) : null}
 

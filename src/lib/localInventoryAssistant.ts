@@ -5,6 +5,90 @@ import { haystackForPart, meaningfulTokens } from '@/lib/partFilters'
 const MUADIL_HINT =
   /muadil|alternatif|yerine|benzer|eşdeğer|esdeger|eş değer|ne kullan|öner|önerir|tavsiye|başka|baska|ekvivalent/i
 
+const STOCK_SUMMARY_HINT =
+  /kaç\s*(farklı\s*)?parça|stok\s*özeti|toplam\s*stok|envanter\s*özeti|genel\s*(stok\s*)?durum|stokta\s*ne\s*var|özet\s*ver/i
+
+const LOW_STOCK_HINT =
+  /kritik|azalan|biten|tüken|tuken|stokta\s*yok|düşük\s*stok|az\s*kalan|0\s*adet|sipariş\s*gerek/i
+
+const LOW_QTY_THRESHOLD = 3
+
+function tryAggregateReply(parts: Part[], raw: string): LocalAssistantResult | null {
+  const queryPreview = raw.length > 72 ? `${raw.slice(0, 72)}…` : raw
+
+  if (STOCK_SUMMARY_HINT.test(raw)) {
+    const total = parts.length
+    if (total === 0) {
+      return {
+        kind: 'empty',
+        message: 'Henüz kayıtlı parça yok. Kayıt ekranından stok ekleyin; ardından özet soruları sorabilirsiniz.',
+      }
+    }
+    const outOfStock = parts.filter((p) => p.quantity <= 0)
+    const low = parts.filter((p) => p.quantity > 0 && p.quantity <= LOW_QTY_THRESHOLD)
+    const byCat = new Map<string, number>()
+    for (const p of parts) {
+      const label = CATEGORY_LABELS[p.category]
+      byCat.set(label, (byCat.get(label) ?? 0) + 1)
+    }
+    const catLines = [...byCat.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([k, n]) => `• ${k}: ${n} parça`)
+
+    const summary =
+      total === 0
+        ? 'Henüz kayıtlı parça yok. Kayıt ekranından ekleyebilirsiniz.'
+        : `Depoda **${total}** kayıtlı parça var. **${outOfStock.length}** tanesi bitti (0 adet), **${low.length}** tanesi düşük stok (≤${LOW_QTY_THRESHOLD} adet).`
+
+    const topMatches = [...parts]
+      .sort((a, b) => a.quantity - b.quantity)
+      .slice(0, 6)
+      .map((part) => ({ part, score: 1 }))
+
+    return {
+      kind: 'ok',
+      summary,
+      queryPreview,
+      topMatches,
+      related: [],
+      footnote:
+        catLines.length > 0
+          ? `Kategori dağılımı:\n${catLines.join('\n')}\n\nÜcretsiz yerel özet; doğal dil için Ayarlar’dan isteğe bağlı Groq/Gemini eklenebilir.`
+          : 'Ücretsiz yerel özet; doğal dil için Ayarlar’dan isteğe bağlı Groq/Gemini eklenebilir.',
+    }
+  }
+
+  if (LOW_STOCK_HINT.test(raw)) {
+    const critical = parts
+      .filter((p) => p.quantity <= LOW_QTY_THRESHOLD)
+      .sort((a, b) => a.quantity - b.quantity)
+
+    if (critical.length === 0) {
+      return {
+        kind: 'no_match',
+        message: `Şu an ≤${LOW_QTY_THRESHOLD} adet veya bitmiş parça görünmüyor.`,
+        hints: ['Kayıt tablosunda adetleri güncelleyin.', 'Farklı bir MPN veya kategori arayın.'],
+      }
+    }
+
+    const summary = `**${critical.length}** parça kritik veya bitmiş (≤${LOW_QTY_THRESHOLD} adet veya 0).`
+    const topMatches = critical.slice(0, 8).map((part) => ({ part, score: 1 }))
+    const related = critical.slice(8, 14).map((part) => ({ part, score: 0.5 }))
+
+    return {
+      kind: 'ok',
+      summary,
+      queryPreview,
+      topMatches,
+      related,
+      footnote: 'Yerel liste; sipariş kararı için Kayıt ekranından doğrulayın.',
+    }
+  }
+
+  return null
+}
+
 export type LocalAssistantResult =
   | { kind: 'empty'; message: string }
   | { kind: 'no_match'; message: string; hints: string[] }
@@ -80,6 +164,9 @@ export function buildLocalAssistantResult(parts: Part[], userMessage: string): L
     }
   }
 
+  const aggregate = tryAggregateReply(parts, raw)
+  if (aggregate) return aggregate
+
   const tokens = tokensFromMessage(raw)
   const terms = expandSearchTerms(tokens)
   const wantMuadil = MUADIL_HINT.test(raw)
@@ -97,7 +184,8 @@ export function buildLocalAssistantResult(parts: Part[], userMessage: string): L
       message: `“${queryPreview}” için depoda anlamlı bir eşleşme bulamadım.`,
       hints: [
         'Kayıt ekranında MPN veya daha kısa anahtar kelime deneyin.',
-        'src/data/termExpansions.ts dosyasına kendi terimlerinizi ekleyebilirsiniz.',
+        '«Stokta kaç parça var?» veya «Kritik stok» gibi genel sorular da sorulabilir.',
+        'İsteğe bağlı: Ayarlar’dan Groq/Gemini ile daha doğal dil yanıtı.',
       ],
     }
   }

@@ -1,7 +1,8 @@
 import { geminiChat } from './gemini'
 import { groqChatCompletion, type GroqMessage } from './groq'
+import { ollamaChatCompletion, type OllamaMessage } from './ollama'
 
-export type DepoChatProvider = 'groq' | 'gemini'
+export type DepoChatProvider = 'groq' | 'gemini' | 'ollama'
 
 export type DepoChatTurn = { role: 'user' | 'assistant'; content: string }
 
@@ -10,6 +11,8 @@ export type DepoChatPayload = {
   apiKey: string
   inventoryJson: string
   history: DepoChatTurn[]
+  ollamaBaseUrl?: string
+  ollamaModel?: string
 }
 
 /** Gemini ilk içerik kullanıcı olmalı; karşılama balonunu API’ye göndermeden kırp */
@@ -34,13 +37,21 @@ function buildSystemPrompt(inventoryJson: string): string {
 
 export async function depoChat(payload: DepoChatPayload): Promise<string> {
   const sys = buildSystemPrompt(payload.inventoryJson)
-  const provider = payload.provider === 'gemini' ? 'gemini' : 'groq'
-
   const history = trimLeadingAssistant(payload.history)
   if (history.length === 0) throw new Error('Sohbet geçmişi boş')
   if (history[history.length - 1].role !== 'user') throw new Error('Son mesaj kullanıcı olmalı')
 
-  if (provider === 'groq') {
+  if (payload.provider === 'ollama') {
+    const base = payload.ollamaBaseUrl?.trim() || 'http://127.0.0.1:11434'
+    const model = payload.ollamaModel?.trim() || 'llama3.2'
+    const messages: OllamaMessage[] = [
+      { role: 'system', content: sys },
+      ...history.map((h) => ({ role: h.role, content: h.content })),
+    ]
+    return ollamaChatCompletion(base, model, messages)
+  }
+
+  if (payload.provider === 'groq') {
     const messages: GroqMessage[] = [
       { role: 'system', content: sys },
       ...history.map((h) => ({ role: h.role, content: h.content })),

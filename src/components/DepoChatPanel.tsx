@@ -54,8 +54,10 @@ type Props = {
   loading: boolean
   bridgeMissing: boolean
   providerLabel: string
+  providerDetail?: string
   stockCount: number
-  hasApiKey: boolean
+  hasEnhancedChat: boolean
+  trialDaysLeft?: number
   onSuggestion?: (text: string) => void
   onClear?: () => void
   onKayitSearch?: () => void
@@ -69,8 +71,10 @@ export function DepoChatPanel({
   loading,
   bridgeMissing,
   providerLabel,
+  providerDetail,
   stockCount,
-  hasApiKey,
+  hasEnhancedChat,
+  trialDaysLeft,
   onSuggestion,
   onClear,
   onKayitSearch,
@@ -89,7 +93,8 @@ export function DepoChatPanel({
     }
   }
 
-  const statusLabel = bridgeMissing ? 'Yerel mod' : hasApiKey ? providerLabel : 'Anahtar gerekli'
+  const statusLabel = bridgeMissing ? 'Yerel mod' : providerLabel
+  const statusSub = bridgeMissing ? undefined : providerDetail
 
   return (
     <div className="ls-chat-shell">
@@ -99,11 +104,12 @@ export function DepoChatPanel({
           <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ls-text-muted">
             <span
               className={`inline-block h-1.5 w-1.5 rounded-full ${
-                bridgeMissing ? 'bg-ls-warn' : hasApiKey ? 'bg-ls-accent' : 'bg-ls-text-muted'
+                bridgeMissing ? 'bg-ls-warn' : hasEnhancedChat ? 'bg-ls-accent' : 'bg-ls-accent'
               }`}
               aria-hidden
             />
             {stockCount} parça · {statusLabel}
+            {statusSub ? <span className="text-ls-text-muted/90"> · {statusSub}</span> : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -118,7 +124,7 @@ export function DepoChatPanel({
             </button>
           ) : null}
           <Link to="/app/ayarlar" className="ls-btn-ghost py-2 text-xs">
-            API
+            Yapay zeka
           </Link>
         </div>
       </div>
@@ -211,13 +217,21 @@ export function DepoChatPanel({
         <p className="shrink-0 border-t border-ls-warn/20 bg-ls-warn-soft px-4 py-2 text-center text-xs text-ls-warn">
           Tam sohbet için uygulamayı Electron (masaüstü) modunda çalıştırın.
         </p>
-      ) : !hasApiKey ? (
+      ) : !hasEnhancedChat ? (
         <p className="shrink-0 border-t border-ls-line bg-ls-muted/50 px-4 py-2 text-center text-xs text-ls-text-muted">
-          Bulut yanıtı için{' '}
+          <strong className="font-medium text-ls-text">Ücretsiz yerel</strong> asistan aktif (sınırsız). Gelişmiş sohbet için{' '}
           <Link to="/app/ayarlar" className="font-medium text-ls-accent hover:underline">
             Ayarlar
           </Link>
-          ’dan Groq veya Gemini anahtarı ekleyin.
+          ’dan Groq, Gemini veya Ollama ekleyin.
+          {trialDaysLeft != null && trialDaysLeft > 0 ? (
+            <span> Bulut denemesi: {trialDaysLeft} gün.</span>
+          ) : null}
+        </p>
+      ) : trialDaysLeft != null && trialDaysLeft > 0 ? (
+        <p className="shrink-0 border-t border-ls-accent/20 bg-ls-accent-soft/40 px-4 py-2 text-center text-xs text-ls-text-muted">
+          Kurulum denemesi: <strong className="text-ls-text">{trialDaysLeft} gün</strong> bulut yanıtı. Sonrasında yerel mod +
+          kendi API anahtarınız.
         </p>
       ) : null}
 

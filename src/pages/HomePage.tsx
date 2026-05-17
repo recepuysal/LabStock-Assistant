@@ -1,72 +1,42 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DepoChatPanel, type ChatMessage } from '@/components/DepoChatPanel'
 import { useInventory } from '@/context/InventoryContext'
+import { buildChatAttempts, getAiChatStatus } from '@/lib/aiKeys'
 import { inventoryJsonForGemini } from '@/lib/geminiInventory'
 import { localInventoryAssistantReply } from '@/lib/localInventoryAssistant'
-import {
-  LS_AI_PROVIDER,
-  LS_GEMINI_API_KEY,
-  LS_GROQ_API_KEY,
-  LS_START_ON_KAYIT,
-} from '@/lib/settingsKeys'
+import { LS_START_ON_KAYIT } from '@/lib/settingsKeys'
 
 function newId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-function readGroqKey(): string {
-  try {
-    return localStorage.getItem(LS_GROQ_API_KEY)?.trim() ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function readGeminiKey(): string {
-  try {
-    return localStorage.getItem(LS_GEMINI_API_KEY)?.trim() ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function buildCloudAttempts(prefer: 'groq' | 'gemini'): Array<{
-  provider: 'groq' | 'gemini'
-  apiKey: string
-  label: string
-}> {
-  const groqKey = readGroqKey()
-  const geminiKey = readGeminiKey()
-  const out: Array<{ provider: 'groq' | 'gemini'; apiKey: string; label: string }> = []
-  const add = (provider: 'groq' | 'gemini') => {
-    const apiKey = provider === 'groq' ? groqKey : geminiKey
-    if (!apiKey || out.some((x) => x.provider === provider)) return
-    out.push({ provider, apiKey, label: provider === 'groq' ? 'Groq' : 'Gemini' })
-  }
-  if (prefer === 'gemini') {
-    add('gemini')
-    add('groq')
+function buildWelcome(): ChatMessage {
+  const s = getAiChatStatus()
+  let extra =
+    '**Ücretsiz yerel asistan** her zaman açık — API gerekmez (arama, stok özeti, kritik liste).'
+  if (s.trialActive) {
+    extra += ` Kurulumda tanımlı bulut denemesi: **${s.trialDaysLeft} gün** kaldı.`
+  } else if (s.hasBundledKeys && !s.hasUserCloudKey) {
+    extra += ' Bulut deneme süresi doldu; Ayarlar’dan kendi Groq/Gemini anahtarınızı ekleyebilirsiniz.'
   } else {
-    add('groq')
-    add('gemini')
+    extra += ' İsterseniz Ayarlar’dan Groq, Gemini veya Ollama ekleyin.'
   }
-  return out
-}
-
-const WELCOME: ChatMessage = {
-  id: 'welcome',
-  role: 'assistant',
-  content:
-    'Merhaba. Stok listenize göre soru sorabilirsiniz. **Ayarlar**’dan Groq veya Gemini anahtarı ekleyin; yoksa yerel özet kullanılır.',
+  return {
+    id: 'welcome',
+    role: 'assistant',
+    content: `Merhaba. ${extra}`,
+  }
 }
 
 export function HomePage() {
   const { parts } = useInventory()
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [WELCOME])
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [buildWelcome()])
   const [composer, setComposer] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+
+  const aiStatus = useMemo(() => getAiChatStatus(), [messages.length])
 
   useEffect(() => {
     try {
@@ -79,30 +49,14 @@ export function HomePage() {
   }, [navigate])
 
   const bridgeMissing = typeof window === 'undefined' || !window.labstock?.depoChat
-
-  const readPreferredProvider = useCallback((): 'groq' | 'gemini' => {
-    try {
-      return localStorage.getItem(LS_AI_PROVIDER) === 'gemini' ? 'gemini' : 'groq'
-    } catch {
-      return 'groq'
-    }
-  }, [])
-
-  const readProviderAndKey = useCallback((): { provider: 'groq' | 'gemini'; apiKey: string; label: string } => {
-    const prefer = readPreferredProvider()
-    const attempts = buildCloudAttempts(prefer)
-    const first = attempts[0]
-    if (first) return { provider: first.provider, apiKey: first.apiKey, label: first.label }
-    return { provider: prefer, apiKey: '', label: prefer === 'gemini' ? 'Gemini' : 'Groq' }
-  }, [readPreferredProvider])
+  const enhancedChat = !bridgeMissing && buildChatAttempts().length > 0
 
   const sendMessage = useCallback(
     async (textOverride?: string) => {
       const text = (textOverride ?? composer).trim()
       if (!text || loading) return
 
-      const prefer = readPreferredProvider()
-      const attempts = buildCloudAttempts(prefer)
+      const attempts = buildChatAttempts()
       const userMsg: ChatMessage = { id: newId(), role: 'user', content: text }
       if (!textOverride) setComposer('')
       setMessages((prev) => [...prev, userMsg])
@@ -119,37 +73,48 @@ export function HomePage() {
         setMessages((prev) => [...prev, { id: newId(), role: 'assistant', content, isFallback }])
       }
 
-      if (bridgeMissing) {
-        const local = localInventoryAssistantReply(parts, text)
-        appendAssistant(`Masaüstü köprüsü yok.\n\n${local}`, true)
-        setLoading(false)
-        return
+      const replyLocal = () => {
+        appendAssistant(localInventoryAssistantReply(parts, text), true)
       }
 
-      if (attempts.length === 0) {
-        appendAssistant(
-          '**Anahtar yok.** Ayarlardan Groq veya Gemini ekleyin.\n\nhttps://console.groq.com/keys\nhttps://aistudio.google.com/app/apikey',
-          true,
-        )
+      if (bridgeMissing || attempts.length === 0) {
+        replyLocal()
         setLoading(false)
         return
       }
 
       let lastErr: string | null = null
+      let usedLabel = ''
+
       for (let i = 0; i < attempts.length; i++) {
-        const { provider, apiKey, label } = attempts[i]!
+        const attempt = attempts[i]!
         try {
-          const reply = await window.labstock!.depoChat({
-            provider,
-            apiKey,
-            inventoryJson: inv,
-            history,
-          })
+          let reply: string
+          if (attempt.kind === 'ollama') {
+            reply = await window.labstock!.depoChat({
+              provider: 'ollama',
+              apiKey: '',
+              inventoryJson: inv,
+              history,
+              ollamaBaseUrl: attempt.baseUrl,
+              ollamaModel: attempt.model,
+            })
+            usedLabel = attempt.label
+          } else {
+            reply = await window.labstock!.depoChat({
+              provider: attempt.provider,
+              apiKey: attempt.apiKey,
+              inventoryJson: inv,
+              history,
+            })
+            usedLabel = attempt.viaTrial ? `${attempt.label} (deneme)` : attempt.label
+          }
+
           const prefix =
-            i > 0
-              ? `**${attempts[0]!.label}** kullanılamadı; yanıt **${label}** ile alındı.\n\n`
+            i > 0 && attempts[0]
+              ? `**${attempts[0].kind === 'cloud' ? attempts[0].label : attempts[0].label}** kullanılamadı; yanıt **${usedLabel}** ile alındı.\n\n`
               : ''
-          appendAssistant((prefix + reply.trim()).trim())
+          appendAssistant((prefix + reply.trim()).trim(), false)
           lastErr = null
           break
         } catch (err) {
@@ -158,24 +123,21 @@ export function HomePage() {
       }
 
       if (lastErr) {
-        const short = lastErr.length > 220 ? `${lastErr.slice(0, 220)}…` : lastErr
+        const short = lastErr.length > 180 ? `${lastErr.slice(0, 180)}…` : lastErr
         const local = localInventoryAssistantReply(parts, text)
-        appendAssistant(`Bulut yanıtı yok.\n\n**Özet:** ${short}\n\n**Yerel özet:**\n\n${local}`, true)
+        appendAssistant(`Gelişmiş yanıt alınamadı (${short}).\n\n**Yerel yanıt:**\n\n${local}`, true)
       }
 
       setLoading(false)
     },
-    [bridgeMissing, composer, loading, messages, parts, readPreferredProvider],
+    [bridgeMissing, composer, loading, messages, parts],
   )
 
   function openKayitFilter() {
     const t = composer.trim()
-    if (t) navigate(`/kayit?q=${encodeURIComponent(t)}`)
+    if (t) navigate(`/app/kayit?q=${encodeURIComponent(t)}`)
     else navigate('/app/kayit')
   }
-
-  const { label: providerLabel } = readProviderAndKey()
-  const hasApiKey = !!(readGroqKey() || readGeminiKey())
 
   return (
     <div className="ls-page ls-page-fill flex min-h-0 flex-1 flex-col !gap-0 !py-3 sm:!px-4">
@@ -186,16 +148,19 @@ export function HomePage() {
         onSend={() => void sendMessage()}
         loading={loading}
         bridgeMissing={bridgeMissing}
-        providerLabel={providerLabel}
+        providerLabel={aiStatus.statusLabel}
+        providerDetail={aiStatus.statusDetail}
         stockCount={parts.length}
-        hasApiKey={hasApiKey}
+        hasEnhancedChat={enhancedChat}
+        trialDaysLeft={aiStatus.trialActive ? aiStatus.trialDaysLeft : undefined}
         onSuggestion={(text) => {
           setComposer(text)
           void sendMessage(text)
         }}
-        onClear={() => setMessages([WELCOME])}
+        onClear={() => setMessages([buildWelcome()])}
         onKayitSearch={openKayitFilter}
       />
     </div>
   )
 }
+

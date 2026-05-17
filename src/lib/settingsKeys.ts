@@ -6,8 +6,20 @@ export const LS_GEMINI_API_KEY = 'labstock.settings.geminiApiKey'
 /** Groq API anahtarı — https://console.groq.com/keys */
 export const LS_GROQ_API_KEY = 'labstock.settings.groqApiKey'
 
-/** Bulut sohbet sağlayıcısı */
+/** Bulut sohbet sağlayıcısı: groq | gemini | ollama */
 export const LS_AI_PROVIDER = 'labstock.settings.aiProvider'
+
+/** İlk kurulumda .env deneme bulutu için başlangıç zamanı (ms) */
+export const LS_AI_TRIAL_START = 'labstock.ai.trialStartAt'
+
+/** Yerel Ollama sunucusu açık */
+export const LS_OLLAMA_ENABLED = 'labstock.settings.ollamaEnabled'
+
+/** Ollama API kökü (ör. http://127.0.0.1:11434) */
+export const LS_OLLAMA_BASE_URL = 'labstock.settings.ollamaBaseUrl'
+
+/** Ollama model adı (ör. llama3.2) */
+export const LS_OLLAMA_MODEL = 'labstock.settings.ollamaModel'
 
 /** Arayüz teması: light | dark */
 export const LS_THEME = 'labstock.settings.theme'

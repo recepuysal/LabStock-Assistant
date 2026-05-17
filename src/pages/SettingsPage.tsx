@@ -9,9 +9,17 @@ import { useTheme } from '@/context/ThemeContext'
 import { downloadPartsAsExcel } from '@/lib/excel'
 import { serializeLabData } from '@/lib/labData'
 import {
+  AI_BUNDLED_TRIAL_DAYS,
+  getAiChatStatus,
+  type AiProvider,
+} from '@/lib/aiKeys'
+import {
   LS_AI_PROVIDER,
   LS_GEMINI_API_KEY,
   LS_GROQ_API_KEY,
+  LS_OLLAMA_BASE_URL,
+  LS_OLLAMA_ENABLED,
+  LS_OLLAMA_MODEL,
   LS_RESEND_API_KEY,
   LS_RESEND_FROM,
   LS_START_ON_KAYIT,
@@ -20,6 +28,7 @@ import { isCloudTeamMode } from '@/lib/supabase/client'
 
 const GEMINI_KEY_URL = 'https://aistudio.google.com/app/apikey'
 const GROQ_KEY_URL = 'https://console.groq.com/keys'
+const OLLAMA_URL = 'https://ollama.com/download'
 const RESEND_KEY_URL = 'https://resend.com/api-keys'
 
 function normalizeApiKeyInput(raw: string): string {
@@ -99,7 +108,11 @@ export function SettingsPage() {
   const [auditOpen, setAuditOpen] = useState(false)
 
   const [startOnKayit, setStartOnKayit] = useState(false)
-  const [aiProvider, setAiProvider] = useState<'groq' | 'gemini'>('groq')
+  const [aiProvider, setAiProvider] = useState<AiProvider>('groq')
+  const [ollamaEnabled, setOllamaEnabled] = useState(false)
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('http://127.0.0.1:11434')
+  const [ollamaModel, setOllamaModel] = useState('llama3.2')
+  const [ollamaSaveStatus, setOllamaSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
   const [groqKey, setGroqKey] = useState('')
   const [geminiKey, setGeminiKey] = useState('')
   const [groqSaveStatus, setGroqSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle')
@@ -127,7 +140,10 @@ export function SettingsPage() {
     try {
       setStartOnKayit(localStorage.getItem(LS_START_ON_KAYIT) === '1')
       const p = localStorage.getItem(LS_AI_PROVIDER)
-      setAiProvider(p === 'gemini' ? 'gemini' : 'groq')
+      setAiProvider(p === 'gemini' || p === 'ollama' ? (p as AiProvider) : 'groq')
+      setOllamaEnabled(localStorage.getItem(LS_OLLAMA_ENABLED) === '1')
+      setOllamaBaseUrl(localStorage.getItem(LS_OLLAMA_BASE_URL) ?? 'http://127.0.0.1:11434')
+      setOllamaModel(localStorage.getItem(LS_OLLAMA_MODEL) ?? 'llama3.2')
       setGroqKey(localStorage.getItem(LS_GROQ_API_KEY) ?? '')
       setGeminiKey(localStorage.getItem(LS_GEMINI_API_KEY) ?? '')
       setResendKey(localStorage.getItem(LS_RESEND_API_KEY) ?? '')
@@ -175,7 +191,7 @@ export function SettingsPage() {
     }
   }
 
-  function setProvider(v: 'groq' | 'gemini') {
+  function setProvider(v: AiProvider) {
     if (isViewer) return
     setAiProvider(v)
     try {
@@ -184,6 +200,24 @@ export function SettingsPage() {
       /* yoksay */
     }
   }
+
+  function persistOllama() {
+    if (isViewer) return
+    try {
+      if (ollamaEnabled) {
+        localStorage.setItem(LS_OLLAMA_ENABLED, '1')
+        localStorage.setItem(LS_OLLAMA_BASE_URL, ollamaBaseUrl.trim() || 'http://127.0.0.1:11434')
+        localStorage.setItem(LS_OLLAMA_MODEL, ollamaModel.trim() || 'llama3.2')
+      } else {
+        localStorage.removeItem(LS_OLLAMA_ENABLED)
+      }
+      setOllamaSaveStatus('saved')
+    } catch {
+      setOllamaSaveStatus('error')
+    }
+  }
+
+  const aiStatus = getAiChatStatus()
 
   function persistGroqKey() {
     if (isViewer) return
@@ -472,11 +506,36 @@ export function SettingsPage() {
 
         {/* Yapay zeka */}
         <SettingsSection
-          title="Yapay zeka — depo sohbeti"
-          description="İstekler Electron üzerinden gider. Groq önerilir; Gemini 429 verirse otomatik Groq denenir."
+          title="Depo yapay zekası"
+          badge="Yerel · sınırsız"
+          description="API anahtarı olmadan sohbet çalışır. İsterseniz aşağıdan ek sağlayıcı ekleyin."
         >
+          <div className="ls-settings-kv">
+            <span className="ls-settings-kv-label">Şu an</span>
+            <span className="ls-settings-kv-value text-right text-xs sm:text-sm">
+              {aiStatus.statusLabel}
+              {aiStatus.statusDetail ? ` — ${aiStatus.statusDetail}` : ''}
+            </span>
+          </div>
+
+          <p className="rounded-lg border border-ls-accent/25 bg-ls-accent-soft/50 px-3 py-2.5 text-sm text-ls-text">
+            <strong className="font-medium">Ücretsiz yerel asistan</strong> her zaman açıktır: parça arama, stok özeti,
+            kritik liste. Süre sınırı yoktur.
+          </p>
+
+          {aiStatus.trialActive ? (
+            <p className="text-sm text-ls-text-muted">
+              Kurulumda tanımlı bulut denemesi: <strong className="text-ls-text">{aiStatus.trialDaysLeft} gün</strong>{' '}
+              kaldı ({AI_BUNDLED_TRIAL_DAYS} gün). Sonrasında yalnızca yerel + sizin eklediğiniz API’ler.
+            </p>
+          ) : aiStatus.hasBundledKeys && !aiStatus.hasUserCloudKey ? (
+            <p className="text-sm text-ls-text-muted">
+              Bulut deneme süresi doldu. Groq veya Gemini anahtarını aşağıya ekleyerek devam edin.
+            </p>
+          ) : null}
+
           <div>
-            <p className="ls-label mb-2">Aktif sağlayıcı</p>
+            <p className="ls-label mb-2">Öncelikli sağlayıcı (gelişmiş yanıt)</p>
             <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Yapay zeka sağlayıcısı">
               <label className="ls-settings-provider">
                 <input
@@ -486,7 +545,7 @@ export function SettingsPage() {
                   disabled={isViewer}
                   onChange={() => setProvider('groq')}
                 />
-                Groq (önerilen)
+                Groq
               </label>
               <label className="ls-settings-provider">
                 <input
@@ -496,17 +555,27 @@ export function SettingsPage() {
                   disabled={isViewer}
                   onChange={() => setProvider('gemini')}
                 />
-                Google Gemini
+                Gemini
+              </label>
+              <label className="ls-settings-provider">
+                <input
+                  type="radio"
+                  name="ai-provider"
+                  checked={aiProvider === 'ollama'}
+                  disabled={isViewer}
+                  onChange={() => setProvider('ollama')}
+                />
+                Ollama
               </label>
             </div>
           </div>
 
           <div className="grid gap-5 border-t border-ls-line/80 pt-4 lg:grid-cols-2">
-            <SettingsField label="Groq API anahtarı" htmlFor="groq-key" link={{ href: GROQ_KEY_URL, label: 'Ücretsiz anahtar →' }}>
+            <SettingsField label="Groq API anahtarı" htmlFor="groq-key" link={{ href: GROQ_KEY_URL, label: 'Ücretsiz →' }}>
               <ApiKeyRow
                 id="groq-key"
                 value={groqKey}
-                placeholder="gsk_…"
+                placeholder="gsk_… (boş = yerel)"
                 disabled={isViewer}
                 onChange={(v) => {
                   setGroqKey(v)
@@ -524,7 +593,7 @@ export function SettingsPage() {
               <ApiKeyRow
                 id="gemini-key"
                 value={geminiKey}
-                placeholder="AIza…"
+                placeholder="AIza… (boş = yerel)"
                 disabled={isViewer}
                 onChange={(v) => {
                   setGeminiKey(v)
@@ -532,7 +601,6 @@ export function SettingsPage() {
                   setGeminiSaveMessage('')
                 }}
                 onSubmit={persistGeminiKey}
-                submitPrimary
               />
               {geminiSaveStatus !== 'idle' ? (
                 <SettingsStatus type={geminiSaveStatus === 'saved' ? 'ok' : 'err'}>{geminiSaveMessage}</SettingsStatus>
@@ -540,8 +608,77 @@ export function SettingsPage() {
             </SettingsField>
           </div>
 
+          <div className="border-t border-ls-line/80 pt-4">
+            <label className={`flex items-start gap-3 ${isViewer ? 'opacity-60' : ''}`}>
+              <input
+                type="checkbox"
+                checked={ollamaEnabled}
+                disabled={isViewer}
+                onChange={(e) => {
+                  setOllamaEnabled(e.target.checked)
+                  setOllamaSaveStatus('idle')
+                }}
+                className="mt-1 h-4 w-4 rounded border-ls-line text-ls-accent"
+              />
+              <span className="text-sm">
+                <span className="font-medium text-ls-text">Ollama (yerel LLM, API anahtarı yok)</span>
+                <span className="mt-0.5 block text-xs text-ls-text-muted">
+                  <a href={OLLAMA_URL} target="_blank" rel="noreferrer" className="text-ls-accent hover:underline">
+                    Ollama
+                  </a>{' '}
+                  kurulu olmalı · <code className="font-mono text-[0.7rem]">ollama pull {ollamaModel || 'llama3.2'}</code>
+                </span>
+              </span>
+            </label>
+            {ollamaEnabled ? (
+              <form
+                className="mt-4 grid gap-3 sm:grid-cols-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  persistOllama()
+                }}
+              >
+                <SettingsField label="Sunucu adresi" htmlFor="ollama-url">
+                  <input
+                    id="ollama-url"
+                    type="url"
+                    disabled={isViewer}
+                    value={ollamaBaseUrl}
+                    onChange={(e) => {
+                      setOllamaBaseUrl(e.target.value)
+                      setOllamaSaveStatus('idle')
+                    }}
+                    className="ls-input"
+                  />
+                </SettingsField>
+                <SettingsField label="Model" htmlFor="ollama-model">
+                  <input
+                    id="ollama-model"
+                    type="text"
+                    disabled={isViewer}
+                    value={ollamaModel}
+                    onChange={(e) => {
+                      setOllamaModel(e.target.value)
+                      setOllamaSaveStatus('idle')
+                    }}
+                    className="ls-input"
+                  />
+                </SettingsField>
+                <div className="sm:col-span-2 flex flex-wrap items-center gap-3">
+                  <button type="submit" disabled={isViewer} className="ls-btn-primary">
+                    Ollama kaydet
+                  </button>
+                  {ollamaSaveStatus === 'saved' ? <SettingsStatus type="ok">Kaydedildi.</SettingsStatus> : null}
+                  {ollamaSaveStatus === 'error' ? <SettingsStatus type="err">Kaydedilemedi.</SettingsStatus> : null}
+                </div>
+              </form>
+            ) : null}
+          </div>
+
           <p className="text-2xs leading-relaxed text-ls-text-muted">
-            Yerel hızlı özet Kayıt ekranında çalışmaya devam eder; bulut kesilirse sohbet otomatik yerel metne düşer.
+            Laboratuvar: <code className="font-mono text-[0.75rem]">.env</code> içinde{' '}
+            <code className="font-mono text-[0.75rem]">VITE_GROQ_API_KEY</code> varsa her kurulum{' '}
+            {AI_BUNDLED_TRIAL_DAYS} gün bulut denemesi görür.
           </p>
         </SettingsSection>
 
