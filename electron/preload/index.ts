@@ -54,6 +54,19 @@ export type ResendSendPayload = {
 
 export type ResendSendResult = { ok: true } | { ok: false; error: string }
 
+export type SupplierImportInvokeResult =
+  | {
+      ok: true
+      supplier: 'lcsc' | 'digikey' | 'farnell' | 'mouser' | 'tme'
+      mpn: string
+      description: string
+      footprint?: string
+      category: string
+      supplierSkus: Partial<Record<'lcsc' | 'digikey' | 'farnell' | 'mouser' | 'tme', string>>
+      brand?: string
+    }
+  | { ok: false; error: string }
+
 contextBridge.exposeInMainWorld('labstock', {
   geminiAsk(payload: LabStockGeminiPayload) {
     return ipcRenderer.invoke('labstock:gemini-ask', payload) as Promise<string>
@@ -72,6 +85,12 @@ contextBridge.exposeInMainWorld('labstock', {
   },
   sendResendEmail(payload: ResendSendPayload): Promise<ResendSendResult> {
     return ipcRenderer.invoke('labstock:resend-send', payload) as Promise<ResendSendResult>
+  },
+  importFromSupplierUrl(payload: { url: string }): Promise<SupplierImportInvokeResult> {
+    return ipcRenderer.invoke(
+      'labstock:import-supplier-url',
+      payload,
+    ) as Promise<SupplierImportInvokeResult>
   },
 })
 

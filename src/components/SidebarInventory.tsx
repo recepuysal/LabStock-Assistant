@@ -1,10 +1,12 @@
-import { useId, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
   type Part,
   type PartCategory,
 } from '@/data/sampleParts'
+import { SupplierSkuFields } from '@/components/SupplierSkuFields'
+import { compactSupplierSkus, SUPPLIER_IDS, SUPPLIER_LABELS, type SupplierSkus } from '@/data/suppliers'
 import {
   consolidateByMpn,
   downloadExcelTemplate,
@@ -13,6 +15,7 @@ import {
   type ExcelRowError,
   type MergeReport,
 } from '@/lib/excel'
+import { fetchPartFromSupplierUrl } from '@/lib/supplierImport'
 
 export type EntryPanelTab = 'add' | 'excel'
 
@@ -68,12 +71,24 @@ export function SidebarInventory({
   const [quantity, setQuantity] = useState('1')
   const [location, setLocation] = useState('')
   const [footprint, setFootprint] = useState('')
+  const [supplierSkus, setSupplierSkus] = useState<SupplierSkus>({})
+  const [supplierUrl, setSupplierUrl] = useState('')
+  const [supplierImporting, setSupplierImporting] = useState(false)
 
   const [formMsg, setFormMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
   const [importMsg, setImportMsg] = useState<string | null>(null)
   const [importErrors, setImportErrors] = useState<ExcelRowError[]>([])
 
   const title = activeTab === 'add' ? 'Yeni parça' : 'Excel içe aktar'
+  const titleId = `${formId}-entry-title`
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   function handleAddPart(e: React.FormEvent) {
     e.preventDefault()
@@ -107,6 +122,7 @@ export function SidebarInventory({
       quantity: q,
       location: location.trim() || '—',
       footprint: footprint.trim() || undefined,
+      supplierSkus: compactSupplierSkus(supplierSkus),
     })
     setFormMsg({ type: 'ok', text: 'Eklendi.' })
     setMpn('')
@@ -114,6 +130,41 @@ export function SidebarInventory({
     setQuantity('1')
     setLocation('')
     setFootprint('')
+    setSupplierSkus({})
+    setSupplierUrl('')
+  }
+
+  async function handleSupplierImport() {
+    if (readOnly || supplierImporting) return
+    setFormMsg(null)
+    const url = supplierUrl.trim()
+    if (!url) {
+      setFormMsg({
+        type: 'err',
+        text: 'LCSC, DigiKey, Farnell, Mouser veya TME ürün bağlantısı yapıştırın.',
+      })
+      return
+    }
+    setSupplierImporting(true)
+    try {
+      const res = await fetchPartFromSupplierUrl(url)
+      if (!res.ok) {
+        setFormMsg({ type: 'err', text: res.error })
+        return
+      }
+      const { data } = res
+      setMpn(data.mpn)
+      setCategory(data.category)
+      setDescription(data.description)
+      if (data.footprint) setFootprint(data.footprint)
+      setSupplierSkus((prev) => ({ ...prev, ...data.supplierSkus }))
+      setFormMsg({
+        type: 'ok',
+        text: 'Tedarikçi bilgileri dolduruldu. Adet ve konumu siz girin.',
+      })
+    } finally {
+      setSupplierImporting(false)
+    }
   }
 
   async function handleExcelFile(f: File | null) {
@@ -154,25 +205,67 @@ export function SidebarInventory({
   }
 
   return (
-    <section
-      className={`ls-card flex max-h-[min(42vh,22rem)] shrink-0 flex-col overflow-hidden ${readOnly ? 'pointer-events-none opacity-60' : ''}`}
-      aria-label={title}
+    <div
+      className="fixed inset-0 z-[110] flex items-end justify-center bg-black/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      onClick={onClose}
     >
-      <div className="flex items-center justify-between border-b border-ls-line px-4 py-3 sm:px-5">
-        <h3 className="text-sm font-semibold text-ls-text">{title}</h3>
-        <button
-          type="button"
-          onClick={onClose}
-          className="ls-btn-ghost -mr-2 py-1.5"
-          aria-label="Kapat"
-        >
-          ✕
-        </button>
-      </div>
+      <div
+        className={`ls-card flex max-h-[min(92vh,40rem)] w-full flex-col overflow-hidden rounded-t-2xl sm:rounded-xl ${
+          activeTab === 'add' ? 'max-w-3xl' : 'max-w-lg'
+        } ${readOnly ? 'pointer-events-none opacity-60' : ''}`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-ls-line px-4 py-4 sm:px-5">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-ls-text-muted">
+              Stok envanteri
+            </p>
+            <h2 id={titleId} className="mt-0.5 text-base font-semibold text-ls-text">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ls-btn-ghost -mr-1 shrink-0 px-2 py-1.5 text-lg leading-none"
+            aria-label="Kapat"
+          >
+            ✕
+          </button>
+        </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {activeTab === 'add' ? (
         <form id={formId} className="p-4 sm:p-5" onSubmit={handleAddPart}>
+          <div className="mb-4 rounded-lg border border-ls-line bg-ls-muted/40 p-3">
+            <p className="text-xs font-medium text-ls-text">Tedarikçiden doldur</p>
+            <p className="mt-0.5 text-xs text-ls-text-muted">
+              LCSC, DigiKey, Farnell, Mouser veya TME ürün sayfası bağlantısı; MPN, açıklama ve
+              tedarikçi kodu otomatik gelir.
+            </p>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <input
+                type="url"
+                value={supplierUrl}
+                onChange={(e) => setSupplierUrl(e.target.value)}
+                className="ls-input min-w-0 flex-1 font-mono text-xs"
+                placeholder="https://www.lcsc.com/product-detail/C160402.html veya DigiKey / Mouser / …"
+                autoComplete="off"
+                disabled={supplierImporting}
+              />
+              <button
+                type="button"
+                disabled={readOnly || supplierImporting}
+                onClick={() => void handleSupplierImport()}
+                className="ls-btn-secondary shrink-0 whitespace-nowrap"
+              >
+                {supplierImporting ? 'Çekiliyor…' : 'Siteden doldur'}
+              </button>
+            </div>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <FormField label="MPN" required htmlFor={`${formId}-mpn`}>
               <input
@@ -236,6 +329,15 @@ export function SidebarInventory({
             </FormField>
           </div>
 
+          <div className="mt-4">
+            <SupplierSkuFields
+              idPrefix={formId}
+              value={supplierSkus}
+              onChange={setSupplierSkus}
+              disabled={readOnly}
+            />
+          </div>
+
           {formMsg ? (
             <p
               className={`mt-3 text-sm ${formMsg.type === 'ok' ? 'text-ls-accent' : 'text-ls-danger'}`}
@@ -257,8 +359,9 @@ export function SidebarInventory({
           onFile={(f) => void handleExcelFile(f)}
         />
       )}
+        </div>
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -295,7 +398,7 @@ function ExcelPanel({
       <p className="text-sm text-ls-text-muted">
         Başlık:{' '}
         <span className="font-mono text-xs text-ls-text">
-          MPN, Kategori, Açıklama, Adet, Konum, Paket
+          MPN, Kategori, Açıklama, Adet, Konum, Paket, {SUPPLIER_IDS.map((id) => SUPPLIER_LABELS[id]).join(', ')}
         </span>
       </p>
       <div className="flex flex-wrap gap-2">

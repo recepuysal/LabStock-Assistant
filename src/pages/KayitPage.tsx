@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { MpnSupplierLinks } from '@/components/MpnSupplierLinks'
+import { PartDetailModal } from '@/components/PartDetailModal'
 import { SidebarInventory, type EntryPanelTab } from '@/components/SidebarInventory'
 import { StockRowActions } from '@/components/StockRowActions'
 import { useInventory } from '@/context/InventoryContext'
@@ -17,6 +17,12 @@ export function KayitPage() {
   const [category, setCategory] = useState<CategoryFilter>('all')
   const [geminiKeyHint, setGeminiKeyHint] = useState(false)
   const [entryPanel, setEntryPanel] = useState<EntryPanelTab | null>(null)
+  const [selectedMpn, setSelectedMpn] = useState<string | null>(null)
+
+  const selectedPart = useMemo(
+    () => (selectedMpn ? parts.find((p) => p.mpn === selectedMpn) ?? null : null),
+    [parts, selectedMpn],
+  )
 
   useEffect(() => {
     setQuery(searchParams.get('q') ?? '')
@@ -52,8 +58,9 @@ export function KayitPage() {
     [applyQuantityDelta],
   )
 
-  function togglePanel(tab: EntryPanelTab) {
-    setEntryPanel((prev) => (prev === tab ? null : tab))
+  function openPanel(tab: EntryPanelTab) {
+    setSelectedMpn(null)
+    setEntryPanel(tab)
   }
 
   return (
@@ -64,21 +71,21 @@ export function KayitPage() {
           <p>
             {isViewer
               ? 'Salt okunur — düzenlemek için yönetici girişi.'
-              : `${parts.length} kayıt · Tabloda − / + ile adet güncelleyin.`}
+              : `${parts.length} kayıt · Satıra tıklayın (detay) · − / + ile adet güncelleyin.`}
           </p>
         </div>
         {!isViewer ? (
           <div className="flex shrink-0 gap-2">
             <button
               type="button"
-              onClick={() => togglePanel('add')}
+              onClick={() => openPanel('add')}
               className={entryPanel === 'add' ? 'ls-btn-primary' : 'ls-btn-secondary'}
             >
               + Yeni parça
             </button>
             <button
               type="button"
-              onClick={() => togglePanel('excel')}
+              onClick={() => openPanel('excel')}
               className={entryPanel === 'excel' ? 'ls-btn-primary' : 'ls-btn-secondary'}
             >
               Excel
@@ -95,17 +102,6 @@ export function KayitPage() {
           </Link>
           .
         </p>
-      ) : null}
-
-      {entryPanel ? (
-        <SidebarInventory
-          parts={parts}
-          onAddPart={addPart}
-          onExcelMerged={applyExcelMerge}
-          readOnly={isViewer}
-          activeTab={entryPanel}
-          onClose={() => setEntryPanel(null)}
-        />
       ) : null}
 
       <section className="shrink-0 space-y-3">
@@ -133,6 +129,25 @@ export function KayitPage() {
           ))}
         </div>
       </section>
+
+      {entryPanel ? (
+        <SidebarInventory
+          parts={parts}
+          onAddPart={addPart}
+          onExcelMerged={applyExcelMerge}
+          readOnly={isViewer}
+          activeTab={entryPanel}
+          onClose={() => setEntryPanel(null)}
+        />
+      ) : null}
+
+      <PartDetailModal
+        part={selectedPart}
+        open={selectedPart != null}
+        onClose={() => setSelectedMpn(null)}
+        onApplyDelta={applyDelta}
+        readOnly={isViewer}
+      />
 
       <section className="ls-card flex min-h-0 flex-1 flex-col overflow-hidden p-0">
         <div className="flex shrink-0 items-center border-b border-ls-line px-4 py-3 sm:px-5">
@@ -167,15 +182,36 @@ export function KayitPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((p) => (
-                  <tr key={p.mpn}>
+                filtered.map((p) => {
+                  const isSelected = selectedMpn === p.mpn
+                  return (
+                  <tr
+                    key={p.mpn}
+                    tabIndex={0}
+                    role="button"
+                    aria-label={`${p.mpn} detayını aç`}
+                    className={`cursor-pointer ${isSelected ? 'bg-ls-accent-soft/50 ring-1 ring-inset ring-ls-accent/30' : ''}`}
+                    onClick={() => setSelectedMpn(p.mpn)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setSelectedMpn(p.mpn)
+                      }
+                    }}
+                  >
                     <td className="whitespace-nowrap">
                       <span className="ls-badge">{CATEGORY_LABELS[p.category]}</span>
                     </td>
                     <td>
                       <div className="font-mono text-sm font-medium text-ls-text">{p.mpn}</div>
                       <div className="mt-1">
-                        <MpnSupplierLinks mpn={p.mpn} />
+                        {p.supplierSkus?.lcsc ? (
+                          <span className="font-mono text-2xs text-ls-text-muted">
+                            LCSC {p.supplierSkus.lcsc}
+                          </span>
+                        ) : (
+                          <span className="text-2xs text-ls-text-muted/80">Detay için tıklayın</span>
+                        )}
                       </div>
                     </td>
                     <td className="max-w-[200px] truncate text-ls-text-muted sm:max-w-none sm:whitespace-normal">
@@ -192,11 +228,12 @@ export function KayitPage() {
                     </td>
                     <td className="whitespace-nowrap text-ls-text-muted">{p.location}</td>
                     <td className="whitespace-nowrap text-ls-text-muted">{p.footprint ?? '—'}</td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       <StockRowActions part={p} onApplyDelta={applyDelta} readOnly={isViewer} />
                     </td>
                   </tr>
-                ))
+                  )
+                })
               )}
             </tbody>
           </table>

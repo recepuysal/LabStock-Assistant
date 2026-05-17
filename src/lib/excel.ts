@@ -1,5 +1,13 @@
 import * as XLSX from 'xlsx'
 import {
+  SUPPLIER_EXCEL_HEADERS,
+  SUPPLIER_IDS,
+  SUPPLIER_LABELS,
+  compactSupplierSkus,
+  mergeSupplierSkus,
+  type SupplierId,
+} from '@/data/suppliers'
+import {
   CATEGORY_LABELS,
   type Part,
   type PartCategory,
@@ -79,6 +87,27 @@ function mapHeaderToField(header: string): keyof typeof FIELD_SYNONYMS | null {
   return null
 }
 
+function mapHeaderToSupplier(header: string): SupplierId | null {
+  const n = normalizeHeader(header)
+  if (!n) return null
+  for (const id of SUPPLIER_IDS) {
+    const list = SUPPLIER_EXCEL_HEADERS[id]
+    if (list.some((syn) => n === syn || n.includes(syn))) return id
+  }
+  return null
+}
+
+function parseSupplierCols(row: unknown[], supplierColMap: Partial<Record<SupplierId, number>>) {
+  const skus: Partial<Record<SupplierId, string>> = {}
+  for (const id of SUPPLIER_IDS) {
+    const col = supplierColMap[id]
+    if (col === undefined) continue
+    const v = cellStr(row[col])
+    if (v) skus[id] = v
+  }
+  return compactSupplierSkus(skus)
+}
+
 export function parseCategoryValue(raw: unknown): PartCategory | null {
   if (raw == null) return null
   const v = String(raw).trim().toLowerCase()
@@ -124,9 +153,13 @@ export function parseExcelBuffer(buf: ArrayBuffer): ExcelParseResult {
 
   const headerRow = rows[0] as unknown[]
   const colMap: Partial<Record<keyof typeof FIELD_SYNONYMS, number>> = {}
+  const supplierColMap: Partial<Record<SupplierId, number>> = {}
   headerRow.forEach((h, idx) => {
-    const field = mapHeaderToField(cellStr(h))
+    const header = cellStr(h)
+    const field = mapHeaderToField(header)
     if (field && colMap[field] === undefined) colMap[field] = idx
+    const sid = mapHeaderToSupplier(header)
+    if (sid && supplierColMap[sid] === undefined) supplierColMap[sid] = idx
   })
 
   if (colMap.mpn === undefined) {
@@ -191,6 +224,7 @@ export function parseExcelBuffer(buf: ArrayBuffer): ExcelParseResult {
       quantity: q,
       location,
       footprint,
+      supplierSkus: parseSupplierCols(row, supplierColMap),
     })
   }
 
@@ -212,6 +246,7 @@ export function consolidateByMpn(parts: Part[]): Part[] {
         description: prev.description !== '—' ? prev.description : p.description,
         location: prev.location !== '—' ? prev.location : p.location,
         footprint: prev.footprint ?? p.footprint,
+        supplierSkus: mergeSupplierSkus(prev.supplierSkus, p.supplierSkus),
       })
     }
   }
@@ -238,6 +273,7 @@ export function mergePartsIntoInventory(existing: Part[], incoming: Part[]): { n
         description: p.description !== '—' ? p.description : cur.description,
         location: p.location !== '—' ? p.location : cur.location,
         footprint: p.footprint ?? cur.footprint,
+        supplierSkus: mergeSupplierSkus(cur.supplierSkus, p.supplierSkus),
       })
       updated++
     } else {
@@ -253,21 +289,41 @@ export function mergePartsIntoInventory(existing: Part[], incoming: Part[]): { n
 }
 
 /** Mevcut stok listesini Excel olarak indirir (yedek / paylaşım). */
+const EXCEL_HEADERS = [
+  'MPN',
+  'Kategori',
+  'Açıklama',
+  'Adet',
+  'Konum',
+  'Paket',
+  ...SUPPLIER_IDS.map((id) => SUPPLIER_LABELS[id]),
+] as const
+
+function partToExcelRow(p: Part): (string | number)[] {
+  return [
+    p.mpn,
+    CATEGORY_LABELS[p.category],
+    p.description,
+    p.quantity,
+    p.location,
+    p.footprint ?? '',
+    ...SUPPLIER_IDS.map((id) => p.supplierSkus?.[id] ?? ''),
+  ]
+}
+
 export function downloadPartsAsExcel(parts: Part[], filename = 'LabStock-stok.xlsx'): void {
   const wb = XLSX.utils.book_new()
-  const data: (string | number)[][] = [
-    ['MPN', 'Kategori', 'Açıklama', 'Adet', 'Konum', 'Paket'],
-    ...parts.map((p) => [
-      p.mpn,
-      CATEGORY_LABELS[p.category],
-      p.description,
-      p.quantity,
-      p.location,
-      p.footprint ?? '',
-    ]),
-  ]
+  const data: (string | number)[][] = [[...EXCEL_HEADERS], ...parts.map(partToExcelRow)]
   const ws = XLSX.utils.aoa_to_sheet(data)
-  ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 32 }, { wch: 8 }, { wch: 14 }, { wch: 12 }]
+  ws['!cols'] = [
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 32 },
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 12 },
+    ...SUPPLIER_IDS.map(() => ({ wch: 14 })),
+  ]
   XLSX.utils.book_append_sheet(wb, ws, 'Stok')
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
   const blob = new Blob([new Uint8Array(out as ArrayBuffer)], {
@@ -284,12 +340,20 @@ export function downloadPartsAsExcel(parts: Part[], filename = 'LabStock-stok.xl
 export function downloadExcelTemplate(): void {
   const wb = XLSX.utils.book_new()
   const data: (string | number)[][] = [
-    ['MPN', 'Kategori', 'Açıklama', 'Adet', 'Konum', 'Paket'],
-    ['NE555P', 'Entegre', 'Zamanlayıcı IC', 10, 'Kutu A-1', 'DIP-8'],
-    ['RC0603FR-0710KL', 'Direnç', '10 kΩ %1', 100, 'Çekmece R', '0603'],
+    [...EXCEL_HEADERS],
+    ['NE555P', 'Entegre', 'Zamanlayıcı IC', 10, 'Kutu A-1', 'DIP-8', 'C51118', '', '', '', ''],
+    ['RC0603FR-0710KL', 'Direnç', '10 kΩ %1', 100, 'Çekmece R', '0603', '', '', '', '', ''],
   ]
   const ws = XLSX.utils.aoa_to_sheet(data)
-  ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 28 }, { wch: 8 }, { wch: 14 }, { wch: 10 }]
+  ws['!cols'] = [
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 28 },
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 10 },
+    ...SUPPLIER_IDS.map(() => ({ wch: 14 })),
+  ]
   XLSX.utils.book_append_sheet(wb, ws, 'Stok')
   const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
   const blob = new Blob([new Uint8Array(out as ArrayBuffer)], {

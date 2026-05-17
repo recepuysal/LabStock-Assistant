@@ -9,6 +9,7 @@ export function inventoryJsonForGemini(parts: Part[]): string {
     aciklama: p.description,
     konum: p.location,
     ...(p.footprint ? { pcb: p.footprint } : {}),
+    ...(p.supplierSkus && Object.keys(p.supplierSkus).length > 0 ? { supplierSkus: p.supplierSkus } : {}),
   }))
   return JSON.stringify(rows)
 }

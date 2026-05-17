@@ -38,6 +38,8 @@ export const CATEGORY_ORDER: PartCategory[] = [
   'mechanical',
 ]
 
+import type { SupplierSkus } from '@/data/suppliers'
+
 /** Örnek stok satırı; ileride SQLite vb. ile değiştirilecek. */
 export type Part = {
   mpn: string
@@ -46,6 +48,8 @@ export type Part = {
   quantity: number
   location: string
   footprint?: string
+  /** Tedarikçiye özel sipariş kodları (LCSC C…, DigiKey parça no, …) */
+  supplierSkus?: SupplierSkus
 }
 
 export const SAMPLE_PARTS: Part[] = [

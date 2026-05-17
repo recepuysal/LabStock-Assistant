@@ -6,6 +6,7 @@ import os from 'node:os'
 import { depoChat, type DepoChatPayload } from './depoChat'
 import { geminiGenerateContent, type GeminiAskPayload } from './gemini'
 import { getLabstockDataPath, loadLabstockDataFile, saveLabstockDataFile } from './persistence'
+import { importFromSupplierUrl } from './supplierImport'
 import { sendResendEmail, type ResendSendPayload } from './resend'
 import { update } from './update'
 
@@ -191,4 +192,9 @@ ipcMain.handle('labstock:persistence-path', () => {
 
 ipcMain.handle('labstock:resend-send', async (_event, payload: ResendSendPayload) => {
   return sendResendEmail(payload)
+})
+
+ipcMain.handle('labstock:import-supplier-url', async (_event, payload: { url?: string }) => {
+  const url = typeof payload?.url === 'string' ? payload.url : ''
+  return importFromSupplierUrl(url)
 })

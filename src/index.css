@@ -270,6 +270,10 @@
     @apply border-b border-ls-line transition-colors hover:bg-ls-muted/70;
   }
 
+  .ls-table tbody tr[role='button']:focus-visible {
+    @apply outline-none ring-2 ring-inset ring-ls-accent/50;
+  }
+
   .ls-table td {
     @apply px-4 py-2.5 text-ls-text;
   }

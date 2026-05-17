@@ -43,5 +43,20 @@ interface Window {
       subject: string
       html: string
     }): Promise<{ ok: true } | { ok: false; error: string }>
+    importFromSupplierUrl(payload: { url: string }): Promise<
+      | {
+          ok: true
+          supplier: 'lcsc' | 'digikey' | 'farnell' | 'mouser' | 'tme'
+          mpn: string
+          description: string
+          footprint?: string
+          category: string
+          supplierSkus: Partial<
+            Record<'lcsc' | 'digikey' | 'farnell' | 'mouser' | 'tme', string>
+          >
+          brand?: string
+        }
+      | { ok: false; error: string }
+    >
   }
 }

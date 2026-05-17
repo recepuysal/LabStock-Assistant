@@ -1,3 +1,4 @@
+import { SUPPLIER_IDS } from '@/data/suppliers'
 import { CATEGORY_ORDER, type Part, type PartCategory } from '@/data/sampleParts'
 
 export const LAB_DATA_VERSION = 1 as const
@@ -39,6 +40,13 @@ function isPart(x: unknown): x is Part {
     return false
   if (typeof o.location !== 'string') return false
   if (o.footprint !== undefined && typeof o.footprint !== 'string') return false
+  if (o.supplierSkus !== undefined) {
+    if (!o.supplierSkus || typeof o.supplierSkus !== 'object') return false
+    const sk = o.supplierSkus as Record<string, unknown>
+    for (const key of Object.keys(sk)) {
+      if (typeof sk[key] !== 'string') return false
+    }
+  }
   return true
 }
 

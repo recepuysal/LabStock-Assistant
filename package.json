@@ -1,6 +1,6 @@
 {
   "name": "labstock-assistant",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "main": "dist-electron/main/index.js",
   "productName": "LabStock Assistant",
   "description": "Elektronik malzeme stok takibi (masaüstü).",
